@@ -89,7 +89,7 @@ Content-Type: application/json
 {
   "symbol": "MICH",
   "type": "BUY",
-  "price": 500,
+  "price": 510,
   "quantity": 5
 }
 
@@ -101,6 +101,6 @@ Content-Type: application/json
 {
   "symbol": "MICH",
   "type": "SELL",
-  "price": 500,
-  "quantity": 11
+  "price": 510,
+  "quantity": 10
 }

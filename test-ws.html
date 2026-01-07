@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M-bit WebSocket Test</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #1e1e1e; color: #0f0; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; border: 1px solid #333; padding: 20px; }
+        h1 { color: #fff; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .status-box { padding: 10px; background: #333; margin-bottom: 20px; border-radius: 4px; }
+        .price-display { font-size: 48px; font-weight: bold; color: #fff; margin: 20px 0; }
+        input, button { padding: 10px; font-size: 16px; }
+        button { cursor: pointer; background: #007acc; color: white; border: none; }
+        button:hover { background: #005f9e; }
+        #logs { font-size: 12px; color: #888; margin-top: 20px; border-top: 1px dashed #444; padding-top: 10px; }
+        .flash-green { animation: flashGreen 1s; }
+        @keyframes flashGreen { 0% { color: #0f0; } 100% { color: #fff; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>📡 M-bit Live Monitor</h1>
+
+    <div class="status-box">
+        Status: <span id="connectionStatus" style="color: red;">Disconnected</span>
+    </div>
+
+    <div>
+        <input type="text" id="symbolInput" value="MICH" placeholder="Kode Saham">
+        <button onclick="joinRoom()">Pantau Saham</button>
+    </div>
+
+    <div class="price-display">
+        <span id="stockSymbol">---</span>:
+        <span id="livePrice">0</span>
+    </div>
+
+    <div id="logs">Log aktivitas akan muncul di sini...</div>
+</div>
+
+<script>
+    // 1. Konek ke Backend Express lu
+    const socket = io('http://localhost:3000');
+
+    const statusEl = document.getElementById('connectionStatus');
+    const logsEl = document.getElementById('logs');
+    const priceEl = document.getElementById('livePrice');
+    const symbolEl = document.getElementById('stockSymbol');
+
+    // Helper buat nulis log
+    function log(msg) {
+        logsEl.innerHTML = `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>` + logsEl.innerHTML;
+    }
+
+    // 2. Cek Koneksi
+    socket.on('connect', () => {
+        statusEl.innerText = 'Connected ✅';
+        statusEl.style.color = '#0f0';
+        log('Terhubung ke Server WebSocket!');
+    });
+
+    socket.on('disconnect', () => {
+        statusEl.innerText = 'Disconnected ❌';
+        statusEl.style.color = 'red';
+        log('Terputus dari server...');
+    });
+
+    // 3. Fungsi Join Room (Pantau Saham Tertentu)
+    function joinRoom() {
+        const symbol = document.getElementById('symbolInput').value.toUpperCase();
+        socket.emit('join_stock', symbol);
+        symbolEl.innerText = symbol;
+        log(`Meminta join room: ${symbol}`);
+    }
+
+    // 4. Dengerin Event 'price_update' dari Backend
+    socket.on('price_update', (data) => {
+        console.log('Data diterima:', data);
+
+        // Update angka di layar
+        priceEl.innerText = data.lastPrice;
+
+        // Efek kedap-kedip
+        priceEl.classList.remove('flash-green');
+        void priceEl.offsetWidth; // Trigger reflow
+        priceEl.classList.add('flash-green');
+
+        log(`🔥 UPDATE: ${data.symbol} harga jadi ${data.lastPrice} (Vol: ${data.volume})`);
+    });
+
+    // 5. Dengerin notifikasi pesanan pribadi
+    socket.on('order_matched', (data) => {
+        alert(`NOTIFIKASI: ${data.message}`);
+    });
+
+</script>
+
+</body>
+</html>
