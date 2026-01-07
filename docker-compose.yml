@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  db_mbit:
+    image: postgres:latest
+    container_name: db_mbit
+    restart: always
+    environment:
+      POSTGRES_USER: michael
+      POSTGRES_PASSWORD: "123"
+      POSTGRES_DB: mbit_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql
+
+  redis_mbit:
+    image: redis:latest
+    container_name: redis_mbit
+    restart: always
+    ports:
+      - "6379:6379"

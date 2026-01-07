@@ -1,0 +1,106 @@
+### Register User Baru
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "michael_k",
+  "fullName": "Michael Kurniawan",
+  "password": "password123"
+}
+
+###
+
+### Login User
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "michael_k",
+  "password": "password123"
+}
+
+### 1. Login dulu buat dapet Token
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "michael_k",
+  "password": "password123"
+}
+
+> {% client.global.set("auth_token", response.body.token); %}
+
+### 2. Cek Portfolio (Pake Token hasil login)
+GET http://localhost:3000/api/portfolio/me
+Authorization: Bearer {{auth_token}}
+
+
+### Pasang Order Beli MICH
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "BUY",
+  "price": 500,
+  "quantity": 10
+}
+
+
+
+### A. Register User Penjual (Biar ada lawan transaksi)
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "seller_1",
+  "fullName": "Si Penjual Saham",
+  "password": "password123"
+}
+
+### B. Login Michael (Pembeli) - Simpan Tokennya
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "michael_k",
+  "password": "password123"
+}
+
+> {% client.global.set("token_buyer", response.body.token); %}
+
+### C. Login Seller - Simpan Tokennya
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "seller_1",
+  "password": "password123"
+}
+
+> {% client.global.set("token_seller", response.body.token); %}
+
+### D. Michael Pasang Order BELI (BUY)
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_buyer}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "BUY",
+  "price": 500,
+  "quantity": 5
+}
+
+### E. Seller Pasang Order JUAL (SELL) di harga yang sama
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_seller}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "SELL",
+  "price": 500,
+  "quantity": 11
+}
