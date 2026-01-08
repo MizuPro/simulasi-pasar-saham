@@ -1,3 +1,5 @@
+//core/market-logic.ts
+
 /**
  * Mendapatkan Tick Size (fraksi harga) berdasarkan rentang harga di IDX
  */

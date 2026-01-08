@@ -1,9 +1,15 @@
+//types/index.ts
+
+// User Role Types
+export type UserRole = 'USER' | 'ADMIN';
+
 // 1. Definisi User & RDN
 export interface IUser {
     id: string; // UUID
     username: string;
     full_name: string;
     balance_rdn: number;
+    role: UserRole;
     created_at: Date;
 }
 

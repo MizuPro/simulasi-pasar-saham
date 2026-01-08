@@ -1,107 +1,295 @@
+//core/matching-engine.ts
+
 import { Server } from 'socket.io';
 import pool from '../config/database';
 import redis from '../config/redis';
 
 export class MatchingEngine {
-    // Variable statis buat nyimpen instance Socket.io
     private static io: Server;
 
-    // Panggil ini di index.ts biar engine punya akses ke WebSocket
+    // Lock sederhana untuk mencegah race condition pada saham yang sama
+    private static processingQueue = new Set<string>();
+
     static initialize(ioInstance: Server) {
         this.io = ioInstance;
     }
 
     static async match(symbol: string) {
-        // 1. Ambil harga beli tertinggi (Highest Bid) dan harga jual terendah (Lowest Ask) dari Redis
-        const buyQueue = await redis.zrevrange(`orderbook:${symbol}:buy`, 0, 0, 'WITHSCORES');
-        const sellQueue = await redis.zrange(`orderbook:${symbol}:sell`, 0, 0, 'WITHSCORES');
+        // 1. CEK LOCK: Kalau saham ini lagi diproses, skip dulu biar gak tabrakan
+        if (this.processingQueue.has(symbol)) return;
+        this.processingQueue.add(symbol);
 
-        if (buyQueue.length === 0 || sellQueue.length === 0) return;
+        try {
+            let matchOccurred = true;
 
-        const topBuy = JSON.parse(buyQueue[0]);
-        const buyPrice = parseFloat(buyQueue[1]);
-        const topSell = JSON.parse(sellQueue[0]);
-        const sellPrice = parseFloat(sellQueue[1]);
+            // Loop terus selama masih ada transaksi yang terjadi (Market Sweep)
+            while (matchOccurred) {
+                matchOccurred = false;
 
-        // 2. Cek apakah harga "jodoh" (Harga Beli >= Harga Jual)
-        if (buyPrice >= sellPrice) {
-            // Kita pakai harga sellPrice sebagai harga match (sesuai aturan prioritas waktu/harga)
-            await this.executeTrade(topBuy, topSell, sellPrice, symbol);
+                // 2. FETCH BATCH: Ambil 10 order teratas untuk disortir manual
+                const buyQueueRaw = await redis.zrevrange(`orderbook:${symbol}:buy`, 0, 10, 'WITHSCORES');
+                const sellQueueRaw = await redis.zrange(`orderbook:${symbol}:sell`, 0, 10, 'WITHSCORES');
+
+                if (buyQueueRaw.length === 0 || sellQueueRaw.length === 0) break;
+
+                // Helper untuk parsing array Redis [string, score, string, score...]
+                const parseQueue = (raw: string[]) => {
+                    const parsed = [];
+                    for (let i = 0; i < raw.length; i += 2) {
+                        parsed.push({
+                            data: JSON.parse(raw[i]),
+                            price: parseFloat(raw[i+1])
+                        });
+                    }
+                    return parsed;
+                };
+
+                let buys = parseQueue(buyQueueRaw);
+                let sells = parseQueue(sellQueueRaw);
+
+                // 3. SORTING TIME PRIORITY (FIFO)
+                // Urutkan BUY: Harga Tertinggi -> Waktu Terlama (Timestamp Kecil)
+                buys.sort((a, b) => {
+                    if (b.price !== a.price) return b.price - a.price;
+                    return a.data.timestamp - b.data.timestamp;
+                });
+
+                // Urutkan SELL: Harga Terendah -> Waktu Terlama (Timestamp Kecil)
+                sells.sort((a, b) => {
+                    if (a.price !== b.price) return a.price - b.price;
+                    return a.data.timestamp - b.data.timestamp;
+                });
+
+                const topBuy = buys[0];
+                const topSell = sells[0];
+
+                // 4. CEK JODOH (Harga Beli >= Harga Jual)
+                if (topBuy.price >= topSell.price) {
+                    matchOccurred = true;
+
+                    // Harga Transaksi mengikuti antrean yang diam (Passive Order)
+                    // Jika X beli 520, tapi ada yang jual 500, maka harga deal adalah 500.
+                    const executionPrice = topSell.price;
+
+                    await this.executeTrade(topBuy.data, topSell.data, executionPrice, symbol, topBuy.price, topSell.price);
+                }
+            }
+
+            // Broadcast orderbook update setelah matching selesai
+            if (this.io) {
+                await this.broadcastOrderbook(symbol);
+            }
+        } catch (error) {
+            console.error(`Matching error on ${symbol}:`, error);
+        } finally {
+            // Lepas Lock
+            this.processingQueue.delete(symbol);
         }
     }
 
-    private static async executeTrade(buyOrder: any, sellOrder: any, matchPrice: number, symbol: string) {
+    // Broadcast orderbook terbaru ke semua client yang join room saham
+    private static async broadcastOrderbook(symbol: string) {
+        try {
+            const buyOrders = await redis.zrevrange(`orderbook:${symbol}:buy`, 0, 9, 'WITHSCORES');
+            const sellOrders = await redis.zrange(`orderbook:${symbol}:sell`, 0, 9, 'WITHSCORES');
+
+            const parseOrders = (raw: string[]) => {
+                const result = [];
+                for (let i = 0; i < raw.length; i += 2) {
+                    const data = JSON.parse(raw[i]);
+                    result.push({
+                        price: parseFloat(raw[i + 1]),
+                        quantity: data.remaining_quantity || data.quantity
+                    });
+                }
+                return result;
+            };
+
+            // Aggregate by price level
+            const aggregateByPrice = (orders: any[]) => {
+                const priceMap = new Map();
+                for (const order of orders) {
+                    const existing = priceMap.get(order.price) || { price: order.price, totalQty: 0, count: 0 };
+                    existing.totalQty += order.quantity;
+                    existing.count++;
+                    priceMap.set(order.price, existing);
+                }
+                return Array.from(priceMap.values());
+            };
+
+            this.io.to(symbol).emit('orderbook_update', {
+                symbol,
+                bids: aggregateByPrice(parseOrders(buyOrders)),
+                asks: aggregateByPrice(parseOrders(sellOrders))
+            });
+        } catch (err) {
+            console.error('Broadcast orderbook error:', err);
+        }
+    }
+
+    private static async executeTrade(buyOrder: any, sellOrder: any, matchPrice: number, symbol: string, originalBuyPrice: number, originalSellPrice: number) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
 
-            const matchQty = Math.min(buyOrder.quantity, sellOrder.quantity);
-
-            // 3. Catat di tabel trades
-            await client.query(
-                'INSERT INTO trades (buy_order_id, sell_order_id, price, quantity) VALUES ($1, $2, $3, $4)',
-                [buyOrder.orderId, sellOrder.orderId, matchPrice, matchQty]
+            // DEFENSIVE CHECK: Verify orders exist before proceeding
+            const orderCheck = await client.query(
+                'SELECT id FROM orders WHERE id IN ($1, $2) AND status IN (\'PENDING\', \'PARTIAL\')',
+                [buyOrder.orderId, sellOrder.orderId]
             );
 
-            // 4. Update status order di DB
-            // Note: Di sini lu bisa tambahin logic buat 'PARTIAL' kalau qty gak habis semua
-            // Sekarang kita anggap MATCHED full dulu biar simpel
-            await client.query("UPDATE orders SET status = 'MATCHED', remaining_quantity = 0 WHERE id IN ($1, $2)",
-                [buyOrder.orderId, sellOrder.orderId]);
+            if (orderCheck.rowCount !== 2) {
+                console.warn(`⚠️ Order validation failed. Buy: ${buyOrder.orderId}, Sell: ${sellOrder.orderId}`);
+                console.warn(`  Orders found in DB: ${orderCheck.rowCount}/2`);
 
-            // 5. Update Portfolio Pembeli (Tambah saham)
+                // Remove invalid orders from Redis
+                await redis.zrem(`orderbook:${symbol}:buy`, JSON.stringify(buyOrder));
+                await redis.zrem(`orderbook:${symbol}:sell`, JSON.stringify(sellOrder));
+
+                await client.query('ROLLBACK');
+                return; // Skip this trade
+            }
+
+            // 1. Tentukan Quantity Match (Minimun dari keduanya)
+            const buyQtyAvailable = buyOrder.remaining_quantity || buyOrder.quantity;
+            const sellQtyAvailable = sellOrder.remaining_quantity || sellOrder.quantity;
+
+            const matchQty = Math.min(buyQtyAvailable, sellQtyAvailable);
+
+            // 2. Hitung Sisa (Partial Logic)
+            const buyRemaining = buyQtyAvailable - matchQty;
+            const sellRemaining = sellQtyAvailable - matchQty;
+
+            // 3. Catat Transaksi (Trade Log)
             await client.query(`
+                /* dialect: postgres */
+                INSERT INTO trades (buy_order_id, sell_order_id, price, quantity) VALUES ($1, $2, $3, $4)
+            `, [buyOrder.orderId, sellOrder.orderId, matchPrice, matchQty]);
+
+            // 4. Update Order Pembeli (BUY) di Database & Redis
+            await redis.zrem(`orderbook:${symbol}:buy`, JSON.stringify(buyOrder));
+
+            if (buyRemaining > 0) {
+                await client.query(
+                    "UPDATE orders SET status = 'PARTIAL', remaining_quantity = $1 WHERE id = $2",
+                    [buyRemaining, buyOrder.orderId]
+                );
+                buyOrder.remaining_quantity = buyRemaining;
+                await redis.zadd(`orderbook:${symbol}:buy`, originalBuyPrice, JSON.stringify(buyOrder));
+            } else {
+                await client.query(
+                    "UPDATE orders SET status = 'MATCHED', remaining_quantity = 0 WHERE id = $1",
+                    [buyOrder.orderId]
+                );
+            }
+
+            // 5. Update Order Penjual (SELL) di Database & Redis
+            await redis.zrem(`orderbook:${symbol}:sell`, JSON.stringify(sellOrder));
+
+            if (sellRemaining > 0) {
+                await client.query(
+                    "UPDATE orders SET status = 'PARTIAL', remaining_quantity = $1 WHERE id = $2",
+                    [sellRemaining, sellOrder.orderId]
+                );
+                sellOrder.remaining_quantity = sellRemaining;
+                await redis.zadd(`orderbook:${symbol}:sell`, originalSellPrice, JSON.stringify(sellOrder));
+            } else {
+                await client.query(
+                    "UPDATE orders SET status = 'MATCHED', remaining_quantity = 0 WHERE id = $1",
+                    [sellOrder.orderId]
+                );
+            }
+
+            // 6. Update Portfolio Pembeli (Tambah saham yang dibeli)
+            await client.query(`
+                /* dialect: postgres */
                 INSERT INTO portfolios (user_id, stock_id, quantity_owned, avg_buy_price)
                 VALUES ($1, (SELECT id FROM stocks WHERE symbol = $3), $2, $4)
-                    ON CONFLICT (user_id, stock_id) DO UPDATE SET
-                    quantity_owned = portfolios.quantity_owned + $2
+                ON CONFLICT (user_id, stock_id) DO UPDATE SET 
+                avg_buy_price = ((portfolios.avg_buy_price * portfolios.quantity_owned) + ($4 * $2)) / (portfolios.quantity_owned + $2),
+                quantity_owned = portfolios.quantity_owned + $2
             `, [buyOrder.userId, matchQty, symbol, matchPrice]);
 
-            // 6. Update Saldo Penjual (Tambah duit)
+            // 7. Update Saldo Penjual (Tambah hasil jual)
             const totalGain = matchPrice * (matchQty * 100);
-            await client.query('UPDATE users SET balance_rdn = balance_rdn + $1 WHERE id = $2',
-                [totalGain, sellOrder.userId]);
+            await client.query(
+                'UPDATE users SET balance_rdn = balance_rdn + $1 WHERE id = $2',
+                [totalGain, sellOrder.userId]
+            );
+
+            // 8. Refund jika harga eksekusi lebih rendah dari harga bid
+            if (matchPrice < originalBuyPrice) {
+                const priceDiff = originalBuyPrice - matchPrice;
+                const refundAmount = priceDiff * (matchQty * 100);
+
+                await client.query(
+                    'UPDATE users SET balance_rdn = balance_rdn + $1 WHERE id = $2',
+                    [refundAmount, buyOrder.userId]
+                );
+
+                console.log(`💸 Refund Rp ${refundAmount} ke User ${buyOrder.userId} (Hemat Beli)`);
+            }
+
+            // 9. Update Daily Stock Data (Open, High, Low, Close, Volume)
+            await client.query(`
+                /* dialect: postgres */
+                UPDATE daily_stock_data SET
+                    open_price = COALESCE(open_price, $1),
+                    high_price = GREATEST(COALESCE(high_price, $1), $1),
+                    low_price = LEAST(COALESCE(low_price, $1), $1),
+                    close_price = $1,
+                    volume = COALESCE(volume, 0) + $2
+                WHERE stock_id = (SELECT id FROM stocks WHERE symbol = $3)
+                AND session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
+            `, [matchPrice, matchQty, symbol]);
 
             await client.query('COMMIT');
 
-            // 7. Hapus dari Redis karena sudah Match
-            await redis.zrem(`orderbook:${symbol}:buy`, JSON.stringify(buyOrder));
-            await redis.zrem(`orderbook:${symbol}:sell`, JSON.stringify(sellOrder));
+            console.log(`✅ MATCH! ${symbol}: ${matchQty} lots @ ${matchPrice}`);
 
-            console.log(`✅ MATCH! ${symbol} at ${matchPrice} for ${matchQty} lots`);
-
-            // --- BAGIAN WEBSOCKET (REVISI) ---
+            // 10. WebSocket Notifications
             if (this.io) {
-                // A. Broadcast ke PUBLIC room (buat yang lagi pantau saham ini)
+                // Get prevClose for calculating change (use pool since transaction is committed)
+                const prevCloseRes = await pool.query(`
+                    /* dialect: postgres */
+                    SELECT d.prev_close, d.volume
+                    FROM daily_stock_data d
+                    JOIN stocks s ON d.stock_id = s.id
+                    WHERE s.symbol = $1
+                    AND d.session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
+                `, [symbol]);
+
+                const prevClose = prevCloseRes.rows[0]?.prev_close || matchPrice;
+                const totalVolume = (prevCloseRes.rows[0]?.volume || 0);
+                const change = matchPrice - prevClose;
+                const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+
+                // Broadcast harga terakhir ke semua yang subscribe saham ini
                 this.io.to(symbol).emit('price_update', {
                     symbol: symbol,
                     lastPrice: matchPrice,
-                    volume: matchQty,
-                    timestamp: new Date()
+                    change: change,
+                    changePercent: changePercent,
+                    volume: totalVolume,
+                    timestamp: Date.now()
                 });
 
-                // B. Notifikasi PRIVAT ke Pembeli
-                this.io.to(buyOrder.userId).emit('order_matched', {
-                    type: 'BUY',
-                    symbol: symbol,
-                    price: matchPrice,
-                    quantity: matchQty,
-                    message: `Order Beli ${symbol} berhasil match!`
+                // Notifikasi Personal Pembeli
+                const buyMsg = buyRemaining > 0 ? `Partial Match ${matchQty} Lot` : `Full Match ${matchQty} Lot`;
+                this.io.to(`user:${buyOrder.userId}`).emit('order_matched', {
+                    type: 'BUY', symbol, price: matchPrice, quantity: matchQty, message: `Beli ${symbol}: ${buyMsg}`
                 });
 
-                // C. Notifikasi PRIVAT ke Penjual
-                this.io.to(sellOrder.userId).emit('order_matched', {
-                    type: 'SELL',
-                    symbol: symbol,
-                    price: matchPrice,
-                    quantity: matchQty,
-                    message: `Order Jual ${symbol} berhasil laku!`
+                // Notifikasi Personal Penjual
+                const sellMsg = sellRemaining > 0 ? `Partial Match ${matchQty} Lot` : `Full Match ${matchQty} Lot`;
+                this.io.to(`user:${sellOrder.userId}`).emit('order_matched', {
+                    type: 'SELL', symbol, price: matchPrice, quantity: matchQty, message: `Jual ${symbol}: ${sellMsg}`
                 });
             }
 
         } catch (err) {
             await client.query('ROLLBACK');
-            console.error('❌ Matching Error:', err);
+            console.error('Execute Trade Error:', err);
         } finally {
             client.release();
         }

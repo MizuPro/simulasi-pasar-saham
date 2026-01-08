@@ -1,0 +1,142 @@
+### 1. Buat User A, B, C (Penjual) dan X (Pembeli Sultan)
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "user_a",
+  "fullName": "Seller A",
+  "password": "123"
+}
+
+###
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "user_b",
+  "fullName": "Seller B",
+  "password": "123"
+}
+
+###
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "user_c",
+  "fullName": "Seller C",
+  "password": "123"
+}
+
+###
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "user_x",
+  "fullName": "Sultan X",
+  "password": "123"
+}
+
+### ---------------------------------------------------------
+### STEP 2: LOGIN SEMUANYA (Jalankan satu per satu)
+### ---------------------------------------------------------
+
+### Login A
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user_a",
+  "password": "123"
+}
+
+> {% client.global.set("token_a", response.body.token); %}
+
+### Login B
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user_b",
+  "password": "123"
+}
+
+> {% client.global.set("token_b", response.body.token); %}
+
+### Login C
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user_c",
+  "password": "123"
+}
+
+> {% client.global.set("token_c", response.body.token); %}
+
+### Login X (Sultan)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user_x",
+  "password": "123"
+}
+
+> {% client.global.set("token_x", response.body.token); %}
+
+### ---------------------------------------------------------
+### STEP 3: PASANG JEBAKAN (ANTREAN JUAL BERJENJANG)
+### ---------------------------------------------------------
+
+### A Jual 10 Lot @ 500
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_a}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "SELL",
+  "price": 500,
+  "quantity": 10
+}
+
+### B Jual 20 Lot @ 505
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_b}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "SELL",
+  "price": 505,
+  "quantity": 20 }
+
+### C Jual 5 Lot @ 510
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_c}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "SELL",
+  "price": 510,
+  "quantity": 5
+}
+
+### ---------------------------------------------------------
+### STEP 4: EKSEKUSI (MARKET SWEEP)
+### ---------------------------------------------------------
+
+### X Beli 50 Lot @ 520 (Langsung Sapu Semua)
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_x}}
+Content-Type: application/json
+
+{
+  "symbol": "MICH",
+  "type": "BUY",
+  "price": 520,
+  "quantity": 50
+}

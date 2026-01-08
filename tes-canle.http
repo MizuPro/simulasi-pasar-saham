@@ -1,0 +1,114 @@
+### ---------------------------------------------------------
+### STEP 0: RESET DULU BIAR BERSIH (Jalanin di SQL Console WebStorm)
+### ---------------------------------------------------------
+# TRUNCATE TABLE trades, orders, stock_candles RESTART IDENTITY CASCADE;
+# UPDATE users SET balance_rdn = 100000000;
+# INSERT INTO portfolios (user_id, stock_id, quantity_owned, avg_buy_price)
+# VALUES ((SELECT id FROM users WHERE username = 'user_a'), (SELECT id FROM stocks WHERE symbol = 'MICH'), 1000, 500);
+
+### ---------------------------------------------------------
+### STEP 1: LOGIN (Siapkan Token)
+### ---------------------------------------------------------
+
+### Login Penjual (User A)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user_a",
+  "password": "123"
+}
+
+> {% client.global.set("token_seller", response.body.token); %}
+
+### Login Pembeli (User X)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user_x",
+  "password": "123"
+}
+
+> {% client.global.set("token_buyer", response.body.token); %}
+
+### ---------------------------------------------------------
+### STEP 2: BUAT TRANSAKSI (JALANKAN CEPAT - DALAM 1 MENIT)
+### ---------------------------------------------------------
+
+### A. Transaksi PERTAMA (Harga OPEN: 500)
+# Seller Jual 500
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_seller}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "SELL", "price": 500, "quantity": 1 }
+
+### Buyer Beli 500 (MATCH!)
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_buyer}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "BUY", "price": 500, "quantity": 1 }
+
+
+### B. Transaksi KEDUA (Harga HIGH: 550)
+# Seller Jual 550
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_seller}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "SELL", "price": 550, "quantity": 1 }
+
+### Buyer Beli 550 (MATCH!)
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_buyer}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "BUY", "price": 550, "quantity": 1 }
+
+
+### C. Transaksi KETIGA (Harga LOW: 450)
+# Seller Jual 450
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_seller}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "SELL", "price": 450, "quantity": 1 }
+
+### Buyer Beli 450 (MATCH!)
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_buyer}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "BUY", "price": 450, "quantity": 1 }
+
+
+### D. Transaksi TERAKHIR (Harga CLOSE: 525)
+# Seller Jual 525
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_seller}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "SELL", "price": 525, "quantity": 1 }
+
+### Buyer Beli 525 (MATCH!)
+POST http://localhost:3000/api/orders
+Authorization: Bearer {{token_buyer}}
+Content-Type: application/json
+
+{ "symbol": "MICH", "type": "BUY", "price": 525, "quantity": 1 }
+
+
+### ---------------------------------------------------------
+### STEP 3: TUNGGU MENIT BERGANTI (Tunggu Cron Job Jalan)
+### Lihat jam laptop lu, tunggu sampai detik :00 lewat.
+### ---------------------------------------------------------
+
+
+### ---------------------------------------------------------
+### STEP 4: AMBIL DATA CANDLE
+### ---------------------------------------------------------
+
+GET http://localhost:3000/api/market/candles/MICH
+Content-Type: application/json
