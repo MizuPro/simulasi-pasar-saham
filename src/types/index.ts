@@ -50,3 +50,38 @@ export interface IOrder {
     status: OrderStatus;
     created_at: Date;
 }
+
+// 5. Watchlist Item
+export interface IWatchlistItem {
+    id: number;
+    stock_id: number;
+    symbol: string;
+    name: string;
+    created_at: Date;
+}
+
+// 6. Candle (OHLC)
+export interface ICandle {
+    id: number;
+    stock_id: number;
+    timeframe: '1m' | '5m' | '15m' | '1h' | '1d';
+    open_price: number;
+    high_price: number;
+    low_price: number;
+    close_price: number;
+    volume: number;
+    timestamp: Date;
+}
+
+// 7. Orderbook Entry
+export interface IOrderbookEntry {
+    price: number;
+    totalQty: number;
+    count: number;
+}
+
+export interface IOrderbook {
+    symbol: string;
+    bids: IOrderbookEntry[];
+    asks: IOrderbookEntry[];
+}

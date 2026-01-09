@@ -1,4 +1,4 @@
-//core/matching-engine.ts
+// core/matching-engine.ts
 
 import { Server } from 'socket.io';
 import pool from '../config/database';
@@ -10,21 +10,39 @@ export class MatchingEngine {
     // Lock sederhana untuk mencegah race condition pada saham yang sama
     private static processingQueue = new Set<string>();
 
+    // THROTTLING STATE: Ini "Rem Tangan" buat nyelamatin router lu
+    // Menyimpan timer aktif untuk setiap saham
+    private static broadcastTimers = new Map<string, NodeJS.Timeout>();
+    // Menyimpan status apakah ada update susulan yang tertunda
+    private static pendingBroadcasts = new Set<string>();
+
     static initialize(ioInstance: Server) {
         this.io = ioInstance;
     }
 
     static async match(symbol: string) {
         // 1. CEK LOCK: Kalau saham ini lagi diproses, skip dulu biar gak tabrakan
-        if (this.processingQueue.has(symbol)) return;
+        if (this.processingQueue.has(symbol)) {
+            // console.log(`⏭️ Skipping ${symbol} - already processing`); // Optional log
+            return;
+        }
         this.processingQueue.add(symbol);
+
+        // CRITICAL: Set timeout to prevent infinite processing
+        const timeout = setTimeout(() => {
+            console.error(`⚠️ Matching timeout for ${symbol} - forcing release`);
+            this.processingQueue.delete(symbol);
+        }, 30000); // 30 seconds max
 
         try {
             let matchOccurred = true;
+            let iterations = 0;
+            const MAX_ITERATIONS = 100; // Prevent infinite loops
 
             // Loop terus selama masih ada transaksi yang terjadi (Market Sweep)
-            while (matchOccurred) {
+            while (matchOccurred && iterations < MAX_ITERATIONS) {
                 matchOccurred = false;
+                iterations++;
 
                 // 2. FETCH BATCH: Ambil 10 order teratas untuk disortir manual
                 const buyQueueRaw = await redis.zrevrange(`orderbook:${symbol}:buy`, 0, 10, 'WITHSCORES');
@@ -36,16 +54,23 @@ export class MatchingEngine {
                 const parseQueue = (raw: string[]) => {
                     const parsed = [];
                     for (let i = 0; i < raw.length; i += 2) {
-                        parsed.push({
-                            data: JSON.parse(raw[i]),
-                            price: parseFloat(raw[i+1])
-                        });
+                        try {
+                            parsed.push({
+                                data: JSON.parse(raw[i]),
+                                price: parseFloat(raw[i+1])
+                            });
+                        } catch (parseErr) {
+                            console.error(`Error parsing order data:`, parseErr);
+                            continue;
+                        }
                     }
                     return parsed;
                 };
 
                 let buys = parseQueue(buyQueueRaw);
                 let sells = parseQueue(sellQueueRaw);
+
+                if (buys.length === 0 || sells.length === 0) break;
 
                 // 3. SORTING TIME PRIORITY (FIFO)
                 // Urutkan BUY: Harga Tertinggi -> Waktu Terlama (Timestamp Kecil)
@@ -67,29 +92,71 @@ export class MatchingEngine {
                 if (topBuy.price >= topSell.price) {
                     matchOccurred = true;
 
-                    // Harga Transaksi mengikuti antrean yang diam (Passive Order)
-                    // Jika X beli 520, tapi ada yang jual 500, maka harga deal adalah 500.
-                    const executionPrice = topSell.price;
+                    // Harga Transaksi mengikuti antrean yang diam (Passive Order / Maker)
+                    // Aturan Bursa: Harga deal adalah harga dari order yang sudah mengantre lebih dulu.
+                    const executionPrice = topBuy.data.timestamp < topSell.data.timestamp
+                        ? topBuy.price
+                        : topSell.price;
 
                     await this.executeTrade(topBuy.data, topSell.data, executionPrice, symbol, topBuy.price, topSell.price);
                 }
             }
 
-            // Broadcast orderbook update setelah matching selesai
+            if (iterations >= MAX_ITERATIONS) {
+                console.warn(`⚠️ Max iterations reached for ${symbol}`);
+            }
+
+            // Broadcast orderbook update setelah matching selesai (DENGAN THROTTLING)
             if (this.io) {
                 await this.broadcastOrderbook(symbol);
             }
         } catch (error) {
             console.error(`Matching error on ${symbol}:`, error);
         } finally {
-            // Lepas Lock
+            // CRITICAL: Always clear timeout and release lock
+            clearTimeout(timeout);
             this.processingQueue.delete(symbol);
         }
     }
 
-    // Broadcast orderbook terbaru ke semua client yang join room saham
+    // ============================================================================
+    // 🛡️ THROTTLED BROADCAST: Jantung pertahanan Router lu
+    // ============================================================================
     private static async broadcastOrderbook(symbol: string) {
+        // 1. Cek apakah saham ini lagi masa "Cooldown"?
+        if (this.broadcastTimers.has(symbol)) {
+            // Kalau iya, tandain bahwa ada update baru yang tertunda
+            this.pendingBroadcasts.add(symbol);
+            return; // STOP DISINI, jangan kirim apa-apa dulu
+        }
+
+        // 2. Kalau gak lagi cooldown, kirim update SEKARANG
+        await this.sendOrderbookUpdate(symbol);
+
+        // 3. Pasang Timer Cooldown selama 1000ms (1 Detik)
+        // Selama 1 detik ke depan, semua update orderbook akan di-hold
+        const timer = setTimeout(async () => {
+            // Hapus timer karena cooldown selesai
+            this.broadcastTimers.delete(symbol);
+
+            // Cek apakah selama cooldown tadi ada update yang masuk?
+            if (this.pendingBroadcasts.has(symbol)) {
+                // Hapus tanda pending
+                this.pendingBroadcasts.delete(symbol);
+
+                // Kirim update TERAKHIR yang paling fresh
+                // (Rekursif biar kena throttle lagi untuk cycle berikutnya)
+                await this.broadcastOrderbook(symbol);
+            }
+        }, 1000); // <-- UBAH KE 500 kalau mau lebih cepet dikit, tapi 1000 paling aman
+
+        this.broadcastTimers.set(symbol, timer);
+    }
+
+    // Fungsi asli pengirim data ke Socket (Private, dipanggil oleh throttler)
+    private static async sendOrderbookUpdate(symbol: string) {
         try {
+            // Ambil top 10 bids & asks
             const buyOrders = await redis.zrevrange(`orderbook:${symbol}:buy`, 0, 9, 'WITHSCORES');
             const sellOrders = await redis.zrange(`orderbook:${symbol}:sell`, 0, 9, 'WITHSCORES');
 
@@ -117,11 +184,14 @@ export class MatchingEngine {
                 return Array.from(priceMap.values());
             };
 
+            // Emit ke client
             this.io.to(symbol).emit('orderbook_update', {
                 symbol,
                 bids: aggregateByPrice(parseOrders(buyOrders)),
                 asks: aggregateByPrice(parseOrders(sellOrders))
             });
+
+            // console.log(`📡 Broadcast update for ${symbol}`);
         } catch (err) {
             console.error('Broadcast orderbook error:', err);
         }
@@ -129,6 +199,10 @@ export class MatchingEngine {
 
     private static async executeTrade(buyOrder: any, sellOrder: any, matchPrice: number, symbol: string, originalBuyPrice: number, originalSellPrice: number) {
         const client = await pool.connect();
+
+        // CRITICAL: Set statement timeout for this transaction
+        await client.query('SET LOCAL statement_timeout = 10000'); // 10 seconds
+
         try {
             await client.query('BEGIN');
 
@@ -140,7 +214,6 @@ export class MatchingEngine {
 
             if (orderCheck.rowCount !== 2) {
                 console.warn(`⚠️ Order validation failed. Buy: ${buyOrder.orderId}, Sell: ${sellOrder.orderId}`);
-                console.warn(`  Orders found in DB: ${orderCheck.rowCount}/2`);
 
                 // Remove invalid orders from Redis
                 await redis.zrem(`orderbook:${symbol}:buy`, JSON.stringify(buyOrder));
@@ -249,7 +322,7 @@ export class MatchingEngine {
 
             // 10. WebSocket Notifications
             if (this.io) {
-                // Get prevClose for calculating change (use pool since transaction is committed)
+                // Get prevClose for calculating change
                 const prevCloseRes = await pool.query(`
                     /* dialect: postgres */
                     SELECT d.prev_close, d.volume
@@ -264,7 +337,9 @@ export class MatchingEngine {
                 const change = matchPrice - prevClose;
                 const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
 
-                // Broadcast harga terakhir ke semua yang subscribe saham ini
+                // Broadcast harga terakhir
+                // NOTE: Price update jarang bikin flooding parah dibanding orderbook,
+                // tapi kalau mau super aman, bisa dikasih throttling juga nanti.
                 this.io.to(symbol).emit('price_update', {
                     symbol: symbol,
                     lastPrice: matchPrice,
@@ -274,16 +349,42 @@ export class MatchingEngine {
                     timestamp: Date.now()
                 });
 
-                // Notifikasi Personal Pembeli
+                // Notifikasi Personal Pembeli (Realtime penting, jangan di-throttle)
                 const buyMsg = buyRemaining > 0 ? `Partial Match ${matchQty} Lot` : `Full Match ${matchQty} Lot`;
+                const buyStatus = buyRemaining > 0 ? 'PARTIAL' : 'MATCHED';
+
                 this.io.to(`user:${buyOrder.userId}`).emit('order_matched', {
                     type: 'BUY', symbol, price: matchPrice, quantity: matchQty, message: `Beli ${symbol}: ${buyMsg}`
                 });
 
-                // Notifikasi Personal Penjual
+                this.io.to(`user:${buyOrder.userId}`).emit('order_status', {
+                    order_id: buyOrder.orderId,
+                    status: buyStatus,
+                    price: matchPrice,
+                    matched_quantity: matchQty,
+                    remaining_quantity: buyRemaining,
+                    symbol: symbol,
+                    type: 'BUY',
+                    timestamp: Date.now()
+                });
+
+                // Notifikasi Personal Penjual (Realtime penting, jangan di-throttle)
                 const sellMsg = sellRemaining > 0 ? `Partial Match ${matchQty} Lot` : `Full Match ${matchQty} Lot`;
+                const sellStatus = sellRemaining > 0 ? 'PARTIAL' : 'MATCHED';
+
                 this.io.to(`user:${sellOrder.userId}`).emit('order_matched', {
                     type: 'SELL', symbol, price: matchPrice, quantity: matchQty, message: `Jual ${symbol}: ${sellMsg}`
+                });
+
+                this.io.to(`user:${sellOrder.userId}`).emit('order_status', {
+                    order_id: sellOrder.orderId,
+                    status: sellStatus,
+                    price: matchPrice,
+                    matched_quantity: matchQty,
+                    remaining_quantity: sellRemaining,
+                    symbol: symbol,
+                    type: 'SELL',
+                    timestamp: Date.now()
                 });
             }
 

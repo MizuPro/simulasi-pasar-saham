@@ -186,30 +186,60 @@ export class OrderService {
     static async getOrderHistory(userId: string) {
         const result = await pool.query(`
             /* dialect: postgres */
-            SELECT o.id, s.symbol, o.type, o.price, o.quantity, o.remaining_quantity,
-                   o.status, o.created_at
+            SELECT 
+                o.id, 
+                s.symbol, 
+                o.type, 
+                o.price as target_price, 
+                COALESCE(AVG(t.price), o.price) as execution_price,
+                o.quantity, 
+                o.remaining_quantity,
+                o.status, 
+                o.created_at, 
+                o.session_id
             FROM orders o
             JOIN stocks s ON o.stock_id = s.id
+            LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
             WHERE o.user_id = $1
+            GROUP BY o.id, s.symbol
             ORDER BY o.created_at DESC
             LIMIT 100
         `, [userId]);
 
-        return result.rows;
+        return result.rows.map(row => ({
+            ...row,
+            price: parseFloat(row.execution_price),
+            target_price: parseFloat(row.target_price)
+        }));
     }
 
     // Ambil order aktif (PENDING/PARTIAL) user
     static async getActiveOrders(userId: string) {
         const result = await pool.query(`
             /* dialect: postgres */
-            SELECT o.id, s.symbol, o.type, o.price, o.quantity, o.remaining_quantity,
-                   o.status, o.created_at
+            SELECT 
+                o.id, 
+                s.symbol, 
+                o.type, 
+                o.price as target_price,
+                COALESCE(AVG(t.price), o.price) as execution_price,
+                o.quantity, 
+                o.remaining_quantity,
+                o.status, 
+                o.created_at, 
+                o.session_id
             FROM orders o
             JOIN stocks s ON o.stock_id = s.id
+            LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
             WHERE o.user_id = $1 AND o.status IN ('PENDING', 'PARTIAL')
+            GROUP BY o.id, s.symbol
             ORDER BY o.created_at DESC
         `, [userId]);
 
-        return result.rows;
+        return result.rows.map(row => ({
+            ...row,
+            price: parseFloat(row.execution_price),
+            target_price: parseFloat(row.target_price)
+        }));
     }
 }

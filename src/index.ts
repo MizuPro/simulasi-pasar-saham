@@ -5,7 +5,9 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import pool from './config/database';
+import redis from './config/redis';
 import cron from 'node-cron';
+import rateLimit from 'express-rate-limit';
 
 // Import Routes
 import authRoutes from './routes/auth';
@@ -26,7 +28,16 @@ const io = new Server(httpServer, {
     cors: {
         origin: "*", // Allow semua origin buat socket biar gak ribet
         methods: ["GET", "POST"]
-    }
+    },
+    // CRITICAL: Limit connections and buffer to prevent flooding
+    maxHttpBufferSize: 1e6,        // 1MB max message size
+    pingTimeout: 60000,            // 60s ping timeout
+    pingInterval: 25000,           // Ping every 25s
+    connectTimeout: 45000,         // 45s connection timeout
+    transports: ['websocket', 'polling'],
+    allowUpgrades: true,
+    perMessageDeflate: false,      // Disable compression to save CPU
+    httpCompression: false,
 });
 
 // Masukin instance IO ke Engine biar bisa notif realtime
@@ -42,11 +53,42 @@ app.use(cors({
 
 app.use(express.json());
 
-// 3. Cron Job (Jalan tiap menit detik ke-0)
-cron.schedule('0 * * * * *', () => {
-    MarketService.generateOneMinuteCandles();
+// 2. Setup Middleware Global & Rate Limiting
+const generalLimiter = rateLimit({
+    windowMs: 60000, // 1 minute
+    max: 100,
+    message: { error: 'Terlalu banyak request, coba lagi nanti' },
+    standardHeaders: true,
+    legacyHeaders: false,
 });
-console.log('⏰ Market Data Scheduler Started');
+
+const tradingLimiter = rateLimit({
+    windowMs: 60000, // 1 minute
+    max: 300, // Lebih longgar untuk bot (rata-rata 5 req/detik)
+    message: { error: 'Bot trading Anda terlalu cepat (max 300/menit)' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Terapkan limiters secara spesifik sebelum mounting routes
+app.use('/api/orders', tradingLimiter);
+app.use('/api/auth', generalLimiter);
+app.use('/api/market', generalLimiter);
+app.use('/api/admin', generalLimiter);
+// Endpoint lain yang mungkin diakses lewat /api (seperti portfolio)
+app.use('/api/portfolio', generalLimiter);
+app.use('/api/stocks', generalLimiter);
+
+// 3. Cron Job (Jalan tiap 1 MENIT, bukan tiap detik!)
+// PENTING: '*/1 * * * *' = every 1 minute (bukan setiap detik!)
+cron.schedule('*/1 * * * *', async () => {
+    try {
+        await MarketService.generateOneMinuteCandles();
+    } catch (error) {
+        console.error('⚠️ Cron job error:', error);
+    }
+});
+console.log('⏰ Market Data Scheduler Started (every 1 minute)');
 
 // 4. WebSocket Event Handler
 io.on('connection', (socket) => {
@@ -108,3 +150,42 @@ const port = 3000;
 httpServer.listen(port, () => {
     console.log(`🚀 Server Backend Running at http://localhost:${port}`);
 });
+
+// 8. Graceful Shutdown Handler
+process.on('SIGTERM', async () => {
+    console.log('⚠️ SIGTERM received, shutting down gracefully...');
+    await gracefulShutdown();
+});
+
+process.on('SIGINT', async () => {
+    console.log('⚠️ SIGINT received, shutting down gracefully...');
+    await gracefulShutdown();
+});
+
+async function gracefulShutdown() {
+    try {
+        // Close HTTP server first
+        httpServer.close(() => {
+            console.log('✅ HTTP server closed');
+        });
+
+        // Close Socket.IO connections
+        io.close(() => {
+            console.log('✅ Socket.IO closed');
+        });
+
+        // Close database pool
+        await pool.end();
+        console.log('✅ Database pool closed');
+
+        // Close Redis connection
+        redis.disconnect();
+        console.log('✅ Redis connection closed');
+
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ Error during shutdown:', error);
+        process.exit(1);
+    }
+}
+

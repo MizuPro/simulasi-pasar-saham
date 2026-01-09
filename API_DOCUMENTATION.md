@@ -1,7 +1,7 @@
 # 📚 M-BIT Trading Platform - API Documentation
 
 > **Base URL**: `http://localhost:3000/api`
-> **Version**: 1.1.0
+> **Version**: 1.2.0
 > **Last Updated**: January 8, 2026
 
 ---
@@ -12,10 +12,11 @@
 3. [Market Data](#market-data)
 4. [Trading](#trading)
 5. [Portfolio](#portfolio)
-6. [Admin & Session Management](#admin--session-management)
-7. [User Management (Admin Only)](#user-management-admin-only)
-8. [WebSocket Events](#websocket-events)
-9. [Error Codes](#error-codes)
+6. [Watchlist](#watchlist)
+7. [Admin & Session Management](#admin--session-management)
+8. [User Management (Admin Only)](#user-management-admin-only)
+9. [WebSocket Events](#websocket-events)
+10. [Error Codes](#error-codes)
 
 ---
 
@@ -48,7 +49,7 @@
     "id": "uuid-here",
     "username": "johndoe",
     "full_name": "John Doe",
-    "balance_rdn": 100000000,
+    "balance_rdn": 0,
     "role": "USER",
     "created_at": "2026-01-08T10:00:00Z"
   }
@@ -77,7 +78,7 @@
     "id": "uuid-here",
     "username": "johndoe",
     "full_name": "John Doe",
-    "balance_rdn": 100000000,
+    "balance_rdn": 0,
     "role": "USER"
   }
 }
@@ -108,8 +109,10 @@
 | `/stocks` | ✅ | ✅ |
 | `/session` | ✅ | ✅ |
 | `/market/*` | ✅ | ✅ |
+| `/market/stocks/:symbol/orderbook` | ✅ | ✅ |
 | `/orders/*` | ✅ | ✅ |
 | `/portfolio` | ✅ | ✅ |
+| `/portfolio/watchlist` | ✅ | ✅ |
 | `/admin/orderbook/:symbol` | ✅ | ✅ |
 | `/admin/session/open` | ❌ | ✅ |
 | `/admin/session/close` | ❌ | ✅ |
@@ -129,7 +132,7 @@
   {
     "id": 1,
     "symbol": "MICH",
-    "name": "MICH",
+    "name": "PT. Michael Kurniawan Asia Tbk",
     "is_active": true,
     "lastPrice": 1250.00,
     "prevClose": 1200.00,
@@ -185,7 +188,7 @@ GET /market/candles/MICH?timeframe=5m&limit=100
 [
   {
     "symbol": "MICH",
-    "name": "MICH",
+    "name": "PT. Michael Pratama Tbk",
     "session_number": 5,
     "session_status": "CLOSED",
     "started_at": "2026-01-07T09:00:00Z",
@@ -204,7 +207,41 @@ GET /market/candles/MICH?timeframe=5m&limit=100
 
 ---
 
-### Get Orderbook
+### Get Orderbook (Public)
+**GET** `/market/stocks/:symbol/orderbook`
+
+**Query Parameters:**
+- `limit` (optional): Number of price levels to return (default: `10`)
+
+**Example:**
+```
+GET /market/stocks/MICH/orderbook?limit=10
+```
+
+**Response (200):**
+```json
+{
+  "symbol": "MICH",
+  "bids": [
+    { "price": 1250, "totalQty": 50, "count": 3 },
+    { "price": 1248, "totalQty": 100, "count": 5 }
+  ],
+  "asks": [
+    { "price": 1252, "totalQty": 75, "count": 4 },
+    { "price": 1254, "totalQty": 120, "count": 6 }
+  ]
+}
+```
+
+**Notes:**
+- `bids`: Buy orders (sorted descending by price - highest first)
+- `asks`: Sell orders (sorted ascending by price - lowest first)
+- `totalQty`: Total quantity at that price level (in lots)
+- `count`: Number of orders at that price level
+
+---
+
+### Get Orderbook (Admin Endpoint - Legacy)
 **GET** `/admin/orderbook/:symbol`
 
 **Response (200):**
@@ -296,6 +333,7 @@ GET /market/candles/MICH?timeframe=5m&limit=100
   {
     "id": "uuid",
     "symbol": "MICH",
+    "session_id": 1,
     "type": "BUY",
     "price": 1250,
     "quantity": 10,
@@ -325,6 +363,7 @@ GET /market/candles/MICH?timeframe=5m&limit=100
   {
     "id": "uuid",
     "symbol": "MICH",
+    "session_id": 1,
     "type": "SELL",
     "price": 1260,
     "quantity": 5,
@@ -352,13 +391,94 @@ GET /market/candles/MICH?timeframe=5m&limit=100
     {
       "stock_id": 1,
       "symbol": "MICH",
-      "name": "MICH",
+      "name": "PT. Michael Pratama Tbk",
       "quantity_owned": 25,
       "avg_buy_price": 1200.00
     }
   ]
 }
 ```
+
+---
+
+## 👁️ Watchlist
+
+### Get Watchlist
+**GET** `/portfolio/watchlist`  
+🔒 **Requires Authentication**
+
+**Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "stock_id": 1,
+    "symbol": "MICH",
+    "name": "PT. Michael Pratama Tbk",
+    "created_at": "2026-01-07T10:00:00Z"
+  },
+  {
+    "id": 2,
+    "stock_id": 2,
+    "symbol": "BBCA",
+    "name": "PT. Bank Central Asia Tbk",
+    "created_at": "2026-01-07T11:00:00Z"
+  }
+]
+```
+
+---
+
+### Add to Watchlist
+**POST** `/portfolio/watchlist`  
+🔒 **Requires Authentication**
+
+**Request Body:**
+```json
+{
+  "symbol": "MICH"
+}
+```
+
+**Response (201):**
+```json
+{
+  "message": "Saham berhasil ditambahkan ke watchlist",
+  "item": {
+    "id": 1,
+    "stock_id": 1,
+    "symbol": "MICH",
+    "name": "PT. Michael Pratama Tbk",
+    "created_at": "2026-01-08T10:00:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400`: "Saham tidak ditemukan atau tidak aktif"
+- `400`: "Saham sudah ada di watchlist"
+
+---
+
+### Remove from Watchlist
+**DELETE** `/portfolio/watchlist/:symbol`  
+🔒 **Requires Authentication**
+
+**Example:**
+```
+DELETE /portfolio/watchlist/MICH
+```
+
+**Response (200):**
+```json
+{
+  "message": "Saham berhasil dihapus dari watchlist"
+}
+```
+
+**Error Responses:**
+- `400`: "Saham tidak ditemukan"
+- `400`: "Saham tidak ada di watchlist"
 
 ---
 
@@ -481,7 +601,7 @@ GET /market/candles/MICH?timeframe=5m&limit=100
     "id": "uuid-here",
     "username": "newadmin",
     "full_name": "New Administrator",
-    "balance_rdn": 100000000,
+    "balance_rdn": 0,
     "role": "ADMIN",
     "created_at": "2026-01-08T10:00:00Z"
   }
@@ -501,7 +621,7 @@ GET /market/candles/MICH?timeframe=5m&limit=100
     "id": "uuid-1",
     "username": "admin",
     "full_name": "System Administrator",
-    "balance_rdn": 100000000,
+    "balance_rdn": 0,
     "role": "ADMIN",
     "created_at": "2026-01-01T00:00:00Z"
   },
@@ -509,7 +629,7 @@ GET /market/candles/MICH?timeframe=5m&limit=100
     "id": "uuid-2",
     "username": "johndoe",
     "full_name": "John Doe",
-    "balance_rdn": 95000000,
+    "balance_rdn": 0,
     "role": "USER",
     "created_at": "2026-01-07T10:00:00Z"
   }
@@ -657,14 +777,33 @@ socket.on('price_update', (data) => {
 socket.emit('join_user', userId);
 ```
 
-**Listen:** `order_update`
+**Listen:** `order_matched`
 ```javascript
-socket.on('order_update', (data) => {
+socket.on('order_matched', (data) => {
   console.log(data);
   // {
-  //   orderId: 'uuid',
-  //   status: 'MATCHED',
-  //   remaining_quantity: 0
+  //   type: 'BUY',
+  //   symbol: 'MICH',
+  //   price: 1250,
+  //   quantity: 10,
+  //   message: 'Beli MICH: Full Match 10 Lot'
+  // }
+});
+```
+
+**Listen:** `order_status` (Standard Format)
+```javascript
+socket.on('order_status', (data) => {
+  console.log(data);
+  // {
+  //   order_id: 'uuid-here',
+  //   status: 'MATCHED',           // atau 'PARTIAL'
+  //   price: 1250,                 // harga eksekusi
+  //   matched_quantity: 10,        // jumlah yang berhasil match
+  //   remaining_quantity: 0,       // sisa yang belum terpenuhi
+  //   symbol: 'MICH',
+  //   type: 'BUY',
+  //   timestamp: 1704672000000
   // }
 });
 ```
@@ -768,6 +907,30 @@ Percentage: 25%
 ARA: 1,200 + (1,200 × 0.25) = 1,500
 ARB: 1,200 - (1,200 × 0.25) = 900
 ```
+
+---
+
+## ⚙️ Matching Engine Logic
+
+### Price-Time Priority (FIFO)
+The matching engine follows the **FIFO (First In, First Out)** principle:
+1.  **Price Priority**: Higher buy prices and lower sell prices are matched first.
+2.  **Time Priority**: For orders at the same price, the order that entered the system earlier (older timestamp) is matched first.
+
+### Execution Price Determination
+When a buy order price is greater than or equal to a sell order price, a trade occurs. The execution price is determined by the **Passive Order (Maker)**:
+*   **Passive Order**: The order that was already sitting in the orderbook/queue.
+*   **Aggressive Order**: The incoming order that triggers the match.
+
+**Trade Scenarios:**
+
+| Scenario | Passive Order (First In) | Aggressive Order (Incoming) | Execution Price | Result |
+| :--- | :--- | :--- | :--- | :--- |
+| **A** | Buy @ 420 | Sell @ 418 | **420** | Seller gets a better price (420) than requested (418). |
+| **B** | Sell @ 418 | Buy @ 420 | **418** | Buyer gets a better price (418) than requested (420). |
+
+**Note on Balance Refunds:**
+For Scenario B, since the buyer bid 420 but only paid 418, the system automatically refunds the difference (Rp 2 x quantity x 100) back to the buyer's RDN balance.
 
 ---
 
@@ -894,7 +1057,7 @@ VALUES (
     'admin',
     'System Administrator',
     '$2b$10$your_bcrypt_hash_here',  -- Generate at bcrypt-generator.com
-    100000000,
+    0,
     'ADMIN'
 );
 ```
@@ -922,8 +1085,9 @@ Authorization: Bearer {admin_token}
 ---
 
 ## 🔗 Related Files
-- Schema: `schema.sql`
+- Schema: `db/ALL_schema_database.sql`
 - Role Migration: `db/migration_add_user_role.sql`
+- Candles & Watchlist Migration: `db/migration_add_candles_watchlist.sql`
 - Session Rotation: `db/rotate_session.sql`
 - Session Fix: `db/quick_fix_current_session.sql`
 - Frontend API Client: `mbit_web/src/services/api.ts`
@@ -946,7 +1110,34 @@ CREATE TABLE users (
 );
 ```
 
+### Candles Table (Multi-Timeframe)
+```sql
+CREATE TABLE candles (
+    id          SERIAL PRIMARY KEY,
+    stock_id    INTEGER NOT NULL REFERENCES stocks ON DELETE CASCADE,
+    timeframe   VARCHAR(5) NOT NULL DEFAULT '1m',  -- 1m, 5m, 15m, 1h, 1d
+    open_price  NUMERIC(15, 2) NOT NULL,
+    high_price  NUMERIC(15, 2) NOT NULL,
+    low_price   NUMERIC(15, 2) NOT NULL,
+    close_price NUMERIC(15, 2) NOT NULL,
+    volume      INTEGER NOT NULL DEFAULT 0,
+    timestamp   TIMESTAMP NOT NULL,
+    created_at  TIMESTAMP DEFAULT now(),
+    UNIQUE (stock_id, timeframe, timestamp)
+);
+```
+
+### Watchlists Table
+```sql
+CREATE TABLE watchlists (
+    id         SERIAL PRIMARY KEY,
+    user_id    UUID NOT NULL REFERENCES users ON DELETE CASCADE,
+    stock_id   INTEGER NOT NULL REFERENCES stocks ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE (user_id, stock_id)
+);
+```
+
 ---
 
 **End of API Documentation**
-

@@ -1,7 +1,10 @@
+// routes/info.ts
+
 import { Router, Request, Response } from 'express';
 import pool from '../config/database';
 // Import auth middleware dari path yang benar
 import { auth, AuthRequest } from '../middlewares/auth';
+import { WatchlistService } from '../services/watchlist-service';
 
 const router = Router();
 
@@ -14,7 +17,7 @@ router.get('/stocks', async (req: Request, res: Response) => {
             SELECT 
                 s.id,
                 s.symbol,
-                s.symbol as name,
+                s.name,
                 s.is_active,
                 d.open_price,
                 d.close_price as last_price,
@@ -98,7 +101,7 @@ router.get('/portfolio', auth, async (req: AuthRequest, res: Response) => {
             SELECT 
                 s.id as stock_id,
                 s.symbol, 
-                s.symbol as name,
+                s.name,
                 p.quantity_owned, 
                 p.avg_buy_price
             FROM portfolios p
@@ -194,6 +197,79 @@ router.get('/session', async (req: Request, res: Response) => {
             ended_at: null,
             message: 'Error: ' + err.message
         });
+    }
+});
+
+// ===================== WATCHLIST ENDPOINTS =====================
+
+// GET /portfolio/watchlist - Ambil semua saham favorit user
+router.get('/portfolio/watchlist', auth, async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.userId;
+        if (!userId) {
+            res.status(401).json({ error: 'User ID missing' });
+            return;
+        }
+
+        const watchlist = await WatchlistService.getWatchlist(userId);
+        res.json(watchlist);
+    } catch (err: any) {
+        console.error('❌ Error fetching watchlist:', err.message);
+        res.status(500).json({ error: 'Gagal mengambil watchlist' });
+    }
+});
+
+// POST /portfolio/watchlist - Tambah saham ke favorit
+router.post('/portfolio/watchlist', auth, async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.userId;
+        const { symbol } = req.body;
+
+        if (!userId) {
+            res.status(401).json({ error: 'User ID missing' });
+            return;
+        }
+
+        if (!symbol) {
+            res.status(400).json({ error: 'Symbol wajib diisi' });
+            return;
+        }
+
+        const item = await WatchlistService.addToWatchlist(userId, symbol);
+        res.status(201).json({
+            message: 'Saham berhasil ditambahkan ke watchlist',
+            item
+        });
+    } catch (err: any) {
+        console.error('❌ Error adding to watchlist:', err.message);
+        if (err.message.includes('sudah ada') || err.message.includes('tidak ditemukan')) {
+            res.status(400).json({ error: err.message });
+        } else {
+            res.status(500).json({ error: 'Gagal menambahkan ke watchlist' });
+        }
+    }
+});
+
+// DELETE /portfolio/watchlist/:symbol - Hapus saham dari favorit
+router.delete('/portfolio/watchlist/:symbol', auth, async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.userId;
+        const symbol = req.params.symbol;
+
+        if (!userId) {
+            res.status(401).json({ error: 'User ID missing' });
+            return;
+        }
+
+        await WatchlistService.removeFromWatchlist(userId, symbol);
+        res.json({ message: 'Saham berhasil dihapus dari watchlist' });
+    } catch (err: any) {
+        console.error('❌ Error removing from watchlist:', err.message);
+        if (err.message.includes('tidak ada') || err.message.includes('tidak ditemukan')) {
+            res.status(400).json({ error: err.message });
+        } else {
+            res.status(500).json({ error: 'Gagal menghapus dari watchlist' });
+        }
     }
 });
 
