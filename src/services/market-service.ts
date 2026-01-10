@@ -1,6 +1,7 @@
 //servies/market-service.ts
 
 import pool from '../config/database';
+import redis from '../config/redis';
 
 export class MarketService {
     static async generateOneMinuteCandles() {
@@ -250,5 +251,42 @@ export class MarketService {
 
         const result = await pool.query(query, params);
         return result.rows;
+    }
+
+    // Fungsi untuk mengambil antrean order (Order Queue) pada harga tertentu
+    static async getOrderQueue(symbol: string, price: number) {
+        const symbolKey = symbol.toUpperCase();
+
+        // Cek di antrean BUY dan SELL
+        const [buyOrdersRaw, sellOrdersRaw] = await Promise.all([
+            redis.zrangebyscore(`orderbook:${symbolKey}:buy`, price, price),
+            redis.zrangebyscore(`orderbook:${symbolKey}:sell`, price, price)
+        ]);
+
+        const parseAndSort = (raw: string[], side: 'BUY' | 'SELL') => {
+            const orders = raw.map(str => {
+                try {
+                    const data = JSON.parse(str);
+                    return {
+                        orderId: data.orderId,
+                        userId: data.userId, // Include user ID to see ownership
+                        quantity: data.remaining_quantity || data.quantity,
+                        timestamp: data.timestamp,
+                        side: side
+                    };
+                } catch (e) {
+                    return null;
+                }
+            }).filter(o => o !== null);
+
+            // Sort by timestamp ASC (FIFO: First-In First-Out)
+            return orders.sort((a, b) => (a?.timestamp || 0) - (b?.timestamp || 0));
+        };
+
+        const buyQueue = parseAndSort(buyOrdersRaw, 'BUY');
+        const sellQueue = parseAndSort(sellOrdersRaw, 'SELL');
+
+        // Gabungkan (biasanya hanya satu sisi yang punya harga tersebut, kecuali crossing)
+        return [...buyQueue, ...sellQueue];
     }
 }
