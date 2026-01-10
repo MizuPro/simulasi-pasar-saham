@@ -60,6 +60,7 @@ export class MatchingEngine {
     private static readonly MAX_ITERATIONS_PER_CYCLE = 100;
     private static readonly LOCK_TIMEOUT_MS = 30000;
     private static readonly BROADCAST_THROTTLE_MS = 500; // 500ms throttle for better responsiveness
+    private static readonly DEBUG = false; // Set to true for detailed matching logs
 
     static initialize(ioInstance: Server) {
         this.io = ioInstance;
@@ -173,7 +174,7 @@ export class MatchingEngine {
      * Main entry point - triggers matching untuk symbol tertentu
      */
     static async match(symbol: string) {
-        console.log(`🎯 [${symbol}] Match request received`);
+        if (this.DEBUG) console.log(`🎯 [${symbol}] Match request received`);
 
         // Check circuit breaker
         if (!this.canProcess(symbol)) {
@@ -191,12 +192,12 @@ export class MatchingEngine {
         // If already processing, increment pending counter
         if (queueState.isProcessing) {
             queueState.pending++;
-            console.log(`⏳ [${symbol}] Already processing, pending count: ${queueState.pending}`);
+            if (this.DEBUG) console.log(`⏳ [${symbol}] Already processing, pending count: ${queueState.pending}`);
             return;
         }
 
         queueState.isProcessing = true;
-        console.log(`▶️ [${symbol}] Starting matching process...`);
+        if (this.DEBUG) console.log(`▶️ [${symbol}] Starting matching process...`);
 
         // Safety timeout
         const timeout = setTimeout(() => {
@@ -229,7 +230,7 @@ export class MatchingEngine {
      * Core matching logic
      */
     private static async processMatching(symbol: string) {
-        console.log(`🔄 [${symbol}] Processing matching cycle...`);
+        if (this.DEBUG) console.log(`🔄 [${symbol}] Processing matching cycle...`);
         let matchOccurred = true;
         let iterations = 0;
 
@@ -243,10 +244,10 @@ export class MatchingEngine {
                 redis.zrange(`orderbook:${symbol}:sell`, 0, 19, 'WITHSCORES')
             ]);
 
-            console.log(`📊 [${symbol}] Iteration ${iterations}: ${buyQueueRaw.length/2} buy orders, ${sellQueueRaw.length/2} sell orders`);
+            if (this.DEBUG) console.log(`📊 [${symbol}] Iteration ${iterations}: ${buyQueueRaw.length/2} buy orders, ${sellQueueRaw.length/2} sell orders`);
 
             if (buyQueueRaw.length === 0 || sellQueueRaw.length === 0) {
-                console.log(`⚠️ [${symbol}] No orders to match (buy: ${buyQueueRaw.length/2}, sell: ${sellQueueRaw.length/2})`);
+                if (this.DEBUG) console.log(`⚠️ [${symbol}] No orders to match (buy: ${buyQueueRaw.length/2}, sell: ${sellQueueRaw.length/2})`);
                 break;
             }
 
@@ -263,7 +264,7 @@ export class MatchingEngine {
             const topBuy = buys[0];
             const topSell = sells[0];
 
-            console.log(`🔍 [${symbol}] Matching Check: BUY ${topBuy.price} (${topBuy.data.remaining_quantity} lots) vs SELL ${topSell.price} (${topSell.data.remaining_quantity} lots)`);
+            if (this.DEBUG) console.log(`🔍 [${symbol}] Matching Check: BUY ${topBuy.price} (${topBuy.data.remaining_quantity} lots) vs SELL ${topSell.price} (${topSell.data.remaining_quantity} lots)`);
 
             // Check if prices cross
             if (topBuy.price >= topSell.price) {
@@ -286,7 +287,7 @@ export class MatchingEngine {
 
                 this.stats.tradesExecuted++;
             } else {
-                console.log(`❌ [${symbol}] No match: BUY ${topBuy.price} < SELL ${topSell.price}`);
+                if (this.DEBUG) console.log(`❌ [${symbol}] No match: BUY ${topBuy.price} < SELL ${topSell.price}`);
             }
         }
 
@@ -656,7 +657,7 @@ export class MatchingEngine {
                 timestamp: Date.now()
             });
 
-            console.log(`📡 [${symbol}] Broadcast: ${validBids.length} bids, ${validAsks.length} asks`);
+            if (this.DEBUG) console.log(`📡 [${symbol}] Broadcast: ${validBids.length} bids, ${validAsks.length} asks`);
 
         } catch (err: any) {
             console.error('Broadcast error:', err.message);
