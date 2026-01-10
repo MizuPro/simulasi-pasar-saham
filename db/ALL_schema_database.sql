@@ -1,162 +1,164 @@
-create table public.users
-(
-    id            uuid           default gen_random_uuid() not null
-        primary key,
-    username      varchar(50)                              not null
-        unique,
-    full_name     varchar(100)                             not null,
-    password_hash text                                     not null,
-    balance_rdn   numeric(19, 4) default 0
-        constraint users_balance_rdn_check
-            check (balance_rdn >= (0)::numeric),
-    created_at    timestamp      default CURRENT_TIMESTAMP,
-    constraint users_role_check
-        check ((role)::text = ANY ((ARRAY ['USER'::character varying, 'ADMIN'::character varying])::text[]))
+create table public.daily_stock_data (
+                                         tableoid oid not null,
+                                         cmax cid not null,
+                                         xmax xid not null,
+                                         cmin cid not null,
+                                         xmin xid not null,
+                                         ctid tid not null,
+                                         id integer primary key not null default nextval('daily_stock_data_id_seq'::regclass),
+                                         session_id integer,
+                                         stock_id integer,
+                                         prev_close numeric(19,4) not null,
+                                         open_price numeric(19,4),
+                                         high_price numeric(19,4),
+                                         low_price numeric(19,4),
+                                         close_price numeric(19,4),
+                                         ara_limit numeric(19,4) not null,
+                                         arb_limit numeric(19,4) not null,
+                                         volume bigint default 0,
+                                         foreign key (session_id) references public.trading_sessions (id)
+                                             match simple on update no action on delete cascade,
+                                         foreign key (stock_id) references public.stocks (id)
+                                             match simple on update no action on delete cascade
+);
+create unique index daily_stock_data_session_id_stock_id_key on daily_stock_data using btree (session_id, stock_id);
+create index idx_daily_stock_session on daily_stock_data using btree (session_id, stock_id);
+
+create table public.orders (
+                               tableoid oid not null,
+                               cmax cid not null,
+                               xmax xid not null,
+                               cmin cid not null,
+                               xmin xid not null,
+                               ctid tid not null,
+                               id uuid primary key not null default gen_random_uuid(),
+                               user_id uuid,
+                               stock_id integer,
+                               session_id integer,
+                               type character varying(10) not null,
+                               price numeric(19,4) not null,
+                               quantity integer not null,
+                               remaining_quantity integer not null,
+                               status character varying(20) default 'PENDING',
+                               created_at timestamp without time zone default CURRENT_TIMESTAMP,
+                               updated_at timestamp without time zone default CURRENT_TIMESTAMP,
+                               foreign key (session_id) references public.trading_sessions (id)
+                                   match simple on update no action on delete no action,
+                               foreign key (stock_id) references public.stocks (id)
+                                   match simple on update no action on delete no action,
+                               foreign key (user_id) references public.users (id)
+                                   match simple on update no action on delete no action
+);
+create index idx_orders_status_stock on orders using btree (status, stock_id, price);
+create index idx_orders_user_id on orders using btree (user_id);
+create index idx_orders_stock_id on orders using btree (stock_id);
+create index idx_orders_status on orders using btree (status);
+
+create table public.portfolios (
+                                   tableoid oid not null,
+                                   cmax cid not null,
+                                   xmax xid not null,
+                                   cmin cid not null,
+                                   xmin xid not null,
+                                   ctid tid not null,
+                                   user_id uuid not null,
+                                   stock_id integer not null,
+                                   quantity_owned integer default 0,
+                                   avg_buy_price numeric(19,4) default 0,
+                                   primary key (user_id, stock_id),
+                                   foreign key (stock_id) references public.stocks (id)
+                                       match simple on update no action on delete no action,
+                                   foreign key (user_id) references public.users (id)
+                                       match simple on update no action on delete no action
+);
+create index idx_portfolios_user_id on portfolios using btree (user_id);
+
+create table public.stock_candles (
+                                      tableoid oid not null,
+                                      cmax cid not null,
+                                      xmax xid not null,
+                                      cmin cid not null,
+                                      xmin xid not null,
+                                      ctid tid not null,
+                                      id integer primary key not null default nextval('stock_candles_id_seq'::regclass),
+                                      stock_id integer not null,
+                                      resolution character varying(5) default '1M',
+                                      open_price numeric(15,2) not null,
+                                      high_price numeric(15,2) not null,
+                                      low_price numeric(15,2) not null,
+                                      close_price numeric(15,2) not null,
+                                      volume integer not null,
+                                      start_time timestamp without time zone not null,
+                                      created_at timestamp without time zone default now(),
+                                      foreign key (stock_id) references public.stocks (id)
+                                          match simple on update no action on delete no action
+);
+create index idx_candles_stock_time on stock_candles using btree (stock_id, start_time);
+
+create table public.stocks (
+                               tableoid oid not null,
+                               cmax cid not null,
+                               xmax xid not null,
+                               cmin cid not null,
+                               xmin xid not null,
+                               ctid tid not null,
+                               id integer primary key not null default nextval('stocks_id_seq'::regclass),
+                               symbol character varying(10) not null,
+                               name character varying(100) not null,
+                               is_active boolean default true,
+                               max_shares bigint default 0,
+                               total_shares_sold bigint default 0
+);
+create unique index stocks_symbol_key on stocks using btree (symbol);
+
+create table public.trades (
+                               tableoid oid not null,
+                               cmax cid not null,
+                               xmax xid not null,
+                               cmin cid not null,
+                               xmin xid not null,
+                               ctid tid not null,
+                               id uuid primary key not null default gen_random_uuid(),
+                               buy_order_id uuid,
+                               sell_order_id uuid,
+                               price numeric(19,4) not null,
+                               quantity integer not null,
+                               executed_at timestamp without time zone default CURRENT_TIMESTAMP,
+                               created_at timestamp without time zone default now(),
+                               foreign key (buy_order_id) references public.orders (id)
+                                   match simple on update no action on delete no action,
+                               foreign key (sell_order_id) references public.orders (id)
+                                   match simple on update no action on delete no action
 );
 
-alter table public.users
-    owner to michael;
-
-create table public.stocks
-(
-    id           serial
-        primary key,
-    symbol       varchar(10)  not null
-        unique,
-    name         varchar(100) not null,
-    is_active    boolean        default true,
-    max_shares   bigint         default 0
+create table public.trading_sessions (
+                                         tableoid oid not null,
+                                         cmax cid not null,
+                                         xmax xid not null,
+                                         cmin cid not null,
+                                         xmin xid not null,
+                                         ctid tid not null,
+                                         id integer primary key not null default nextval('trading_sessions_id_seq'::regclass),
+                                         session_number integer not null,
+                                         status character varying(20) default 'CLOSED',
+                                         started_at timestamp without time zone default CURRENT_TIMESTAMP,
+                                         ended_at timestamp without time zone
 );
 
-alter table public.stocks
-    owner to michael;
-
-create table public.trading_sessions
-(
-    id             serial
-        primary key,
-    session_number integer not null,
-    status         varchar(20) default 'CLOSED'::character varying
-        constraint trading_sessions_status_check
-            check ((status)::text = ANY ((ARRAY ['OPEN'::character varying, 'CLOSED'::character varying])::text[])),
-    started_at     timestamp   default CURRENT_TIMESTAMP,
-    ended_at       timestamp
+create table public.users (
+                              tableoid oid not null,
+                              cmax cid not null,
+                              xmax xid not null,
+                              cmin cid not null,
+                              xmin xid not null,
+                              ctid tid not null,
+                              id uuid primary key not null default gen_random_uuid(),
+                              username character varying(50) not null,
+                              full_name character varying(100) not null,
+                              password_hash text not null,
+                              balance_rdn numeric(19,4) default 0,
+                              created_at timestamp without time zone default CURRENT_TIMESTAMP,
+                              role character varying(20) default 'USER'
 );
-
-alter table public.trading_sessions
-    owner to michael;
-
-create table public.daily_stock_data
-(
-    id          serial
-        primary key,
-    session_id  integer
-        references public.trading_sessions
-            on delete cascade,
-    stock_id    integer
-        references public.stocks
-            on delete cascade,
-    prev_close  numeric(19, 4) not null,
-    open_price  numeric(19, 4),
-    high_price  numeric(19, 4),
-    low_price   numeric(19, 4),
-    close_price numeric(19, 4),
-    ara_limit   numeric(19, 4) not null,
-    arb_limit   numeric(19, 4) not null,
-    volume      bigint default 0,
-    unique (session_id, stock_id)
-);
-
-alter table public.daily_stock_data
-    owner to michael;
-
-create index idx_daily_stock_session
-    on public.daily_stock_data (session_id, stock_id);
-
-create table public.orders
-(
-    id                 uuid        default gen_random_uuid() not null
-        primary key,
-    user_id            uuid
-        references public.users,
-    stock_id           integer
-        references public.stocks,
-    session_id         integer
-        references public.trading_sessions,
-    type               varchar(10)                           not null
-        constraint orders_type_check
-            check ((type)::text = ANY ((ARRAY ['BUY'::character varying, 'SELL'::character varying])::text[])),
-    price              numeric(19, 4)                        not null,
-    quantity           integer                               not null
-        constraint orders_quantity_check
-            check (quantity > 0),
-    remaining_quantity integer                               not null,
-    status             varchar(20) default 'PENDING'::character varying
-        constraint orders_status_check
-            check ((status)::text = ANY
-                   ((ARRAY ['PENDING'::character varying, 'MATCHED'::character varying, 'PARTIAL'::character varying, 'CANCELED'::character varying, 'REJECTED'::character varying])::text[])),
-    created_at         timestamp   default CURRENT_TIMESTAMP,
-    updated_at         timestamp   default CURRENT_TIMESTAMP
-);
-
-alter table public.orders
-    owner to michael;
-
-create index idx_orders_status_stock
-    on public.orders (status, stock_id, price);
-
-create table public.trades
-(
-    id            uuid      default gen_random_uuid() not null
-        primary key,
-    buy_order_id  uuid
-        references public.orders,
-    sell_order_id uuid
-        references public.orders,
-    price         numeric(19, 4)                      not null,
-    quantity      integer                             not null,
-    executed_at   timestamp default CURRENT_TIMESTAMP,
-    created_at    timestamp default now()
-);
-
-alter table public.trades
-    owner to michael;
-
-create table public.portfolios
-(
-    user_id        uuid    not null
-        references public.users,
-    stock_id       integer not null
-        references public.stocks,
-    quantity_owned integer        default 0
-        constraint portfolios_quantity_owned_check
-            check (quantity_owned >= 0),
-    avg_buy_price  numeric(19, 4) default 0,
-    primary key (user_id, stock_id)
-);
-
-alter table public.portfolios
-    owner to michael;
-
-create table public.stock_candles
-(
-    id          serial
-        primary key,
-    stock_id    integer        not null
-        references public.stocks,
-    resolution  varchar(5) default '1M'::character varying,
-    open_price  numeric(15, 2) not null,
-    high_price  numeric(15, 2) not null,
-    low_price   numeric(15, 2) not null,
-    close_price numeric(15, 2) not null,
-    volume      integer        not null,
-    start_time  timestamp      not null,
-    created_at  timestamp  default now()
-);
-
-alter table public.stock_candles
-    owner to michael;
-
-create index idx_candles_stock_time
-    on public.stock_candles (stock_id, start_time);
+create unique index users_username_key on users using btree (username);
 

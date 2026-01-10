@@ -60,6 +60,7 @@ export class MatchingEngine {
     private static readonly MAX_ITERATIONS_PER_CYCLE = 100;
     private static readonly LOCK_TIMEOUT_MS = 30000;
     private static readonly BROADCAST_THROTTLE_MS = 500; // 500ms throttle for better responsiveness
+    private static readonly DEBUG = false; // Set to true for detailed matching logs
 
     static initialize(ioInstance: Server) {
         this.io = ioInstance;
@@ -173,7 +174,7 @@ export class MatchingEngine {
      * Main entry point - triggers matching untuk symbol tertentu
      */
     static async match(symbol: string) {
-        console.log(`🎯 [${symbol}] Match request received`);
+        if (this.DEBUG) console.log(`🎯 [${symbol}] Match request received`);
 
         // Check circuit breaker
         if (!this.canProcess(symbol)) {
@@ -191,12 +192,12 @@ export class MatchingEngine {
         // If already processing, increment pending counter
         if (queueState.isProcessing) {
             queueState.pending++;
-            console.log(`⏳ [${symbol}] Already processing, pending count: ${queueState.pending}`);
+            if (this.DEBUG) console.log(`⏳ [${symbol}] Already processing, pending count: ${queueState.pending}`);
             return;
         }
 
         queueState.isProcessing = true;
-        console.log(`▶️ [${symbol}] Starting matching process...`);
+        if (this.DEBUG) console.log(`▶️ [${symbol}] Starting matching process...`);
 
         // Safety timeout
         const timeout = setTimeout(() => {
@@ -229,7 +230,7 @@ export class MatchingEngine {
      * Core matching logic
      */
     private static async processMatching(symbol: string) {
-        console.log(`🔄 [${symbol}] Processing matching cycle...`);
+        if (this.DEBUG) console.log(`🔄 [${symbol}] Processing matching cycle...`);
         let matchOccurred = true;
         let iterations = 0;
 
@@ -243,10 +244,10 @@ export class MatchingEngine {
                 redis.zrange(`orderbook:${symbol}:sell`, 0, 19, 'WITHSCORES')
             ]);
 
-            console.log(`📊 [${symbol}] Iteration ${iterations}: ${buyQueueRaw.length/2} buy orders, ${sellQueueRaw.length/2} sell orders`);
+            if (this.DEBUG) console.log(`📊 [${symbol}] Iteration ${iterations}: ${buyQueueRaw.length/2} buy orders, ${sellQueueRaw.length/2} sell orders`);
 
             if (buyQueueRaw.length === 0 || sellQueueRaw.length === 0) {
-                console.log(`⚠️ [${symbol}] No orders to match (buy: ${buyQueueRaw.length/2}, sell: ${sellQueueRaw.length/2})`);
+                if (this.DEBUG) console.log(`⚠️ [${symbol}] No orders to match (buy: ${buyQueueRaw.length/2}, sell: ${sellQueueRaw.length/2})`);
                 break;
             }
 
@@ -263,7 +264,7 @@ export class MatchingEngine {
             const topBuy = buys[0];
             const topSell = sells[0];
 
-            console.log(`🔍 [${symbol}] Matching Check: BUY ${topBuy.price} (${topBuy.data.remaining_quantity} lots) vs SELL ${topSell.price} (${topSell.data.remaining_quantity} lots)`);
+            if (this.DEBUG) console.log(`🔍 [${symbol}] Matching Check: BUY ${topBuy.price} (${topBuy.data.remaining_quantity} lots) vs SELL ${topSell.price} (${topSell.data.remaining_quantity} lots)`);
 
             // Check if prices cross
             if (topBuy.price >= topSell.price) {
@@ -286,7 +287,7 @@ export class MatchingEngine {
 
                 this.stats.tradesExecuted++;
             } else {
-                console.log(`❌ [${symbol}] No match: BUY ${topBuy.price} < SELL ${topSell.price}`);
+                if (this.DEBUG) console.log(`❌ [${symbol}] No match: BUY ${topBuy.price} < SELL ${topSell.price}`);
             }
         }
 
@@ -472,10 +473,10 @@ export class MatchingEngine {
                 await client.query(`
                     INSERT INTO portfolios (user_id, stock_id, quantity_owned, avg_buy_price)
                     VALUES ($1, (SELECT id FROM stocks WHERE symbol = $3), $2, $4)
-                    ON CONFLICT (user_id, stock_id) DO UPDATE SET 
-                    avg_buy_price = CASE 
-                        WHEN portfolios.quantity_owned + $2 = 0 THEN 0
-                        ELSE ((portfolios.avg_buy_price * portfolios.quantity_owned) + ($4 * $2)) / (portfolios.quantity_owned + $2)
+                        ON CONFLICT (user_id, stock_id) DO UPDATE SET
+                        avg_buy_price = CASE
+                                                               WHEN portfolios.quantity_owned + $2 = 0 THEN 0
+                                                               ELSE ((portfolios.avg_buy_price * portfolios.quantity_owned) + ($4 * $2)) / (portfolios.quantity_owned + $2)
                     END,
                     quantity_owned = portfolios.quantity_owned + $2
                 `, [buyOrder.userId, matchQty, symbol, matchPrice]);
@@ -501,13 +502,13 @@ export class MatchingEngine {
             // 5. Update daily candle stats
             await client.query(`
                 UPDATE daily_stock_data SET
-                    open_price = COALESCE(open_price, $1),
-                    high_price = GREATEST(COALESCE(high_price, $1), $1),
-                    low_price = LEAST(COALESCE(low_price, $1), $1),
-                    close_price = $1,
-                    volume = COALESCE(volume, 0) + $2
+                                            open_price = COALESCE(open_price, $1),
+                                            high_price = GREATEST(COALESCE(high_price, $1), $1),
+                                            low_price = LEAST(COALESCE(low_price, $1), $1),
+                                            close_price = $1,
+                                            volume = COALESCE(volume, 0) + $2
                 WHERE stock_id = (SELECT id FROM stocks WHERE symbol = $3)
-                AND session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
+                  AND session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
             `, [matchPrice, matchQty, symbol]);
 
             // COMMIT DATABASE TRANSACTION
@@ -656,7 +657,7 @@ export class MatchingEngine {
                 timestamp: Date.now()
             });
 
-            console.log(`📡 [${symbol}] Broadcast: ${validBids.length} bids, ${validAsks.length} asks`);
+            if (this.DEBUG) console.log(`📡 [${symbol}] Broadcast: ${validBids.length} bids, ${validAsks.length} asks`);
 
         } catch (err: any) {
             console.error('Broadcast error:', err.message);
@@ -683,11 +684,11 @@ export class MatchingEngine {
             try {
                 // Get price data for change calculation
                 const priceData = await pool.query(`
-                    SELECT volume, prev_close 
-                    FROM daily_stock_data d 
-                    JOIN stocks s ON d.stock_id = s.id 
-                    WHERE s.symbol = $1 
-                    AND session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' LIMIT 1)
+                    SELECT volume, prev_close
+                    FROM daily_stock_data d
+                             JOIN stocks s ON d.stock_id = s.id
+                    WHERE s.symbol = $1
+                      AND session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' LIMIT 1)
                 `, [symbol]);
 
                 const vol = priceData.rows[0]?.volume || 0;
