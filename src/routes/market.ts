@@ -89,4 +89,27 @@ router.get('/stocks/:symbol/orderbook', async (req: Request, res: Response) => {
     }
 });
 
+// GET /api/market/queue/:symbol - Lihat detail antrean order pada harga tertentu
+router.get('/queue/:symbol', async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol;
+        const price = parseFloat(req.query.price as string);
+
+        if (isNaN(price)) {
+            res.status(400).json({ error: 'Parameter price wajib diisi dan harus berupa angka' });
+            return;
+        }
+
+        const queue = await MarketService.getOrderQueue(symbol, price);
+
+        res.json({
+            symbol: symbol.toUpperCase(),
+            price,
+            queue // List order urut berdasarkan timestamp (FIFO)
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Gagal mengambil antrean order' });
+    }
+});
+
 export default router;

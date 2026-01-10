@@ -1,8 +1,14 @@
 # 📚 M-BIT Trading Platform - API Documentation
 
 > **Base URL**: `http://localhost:3000/api`
-> **Version**: 1.2.0
+> **Version**: 1.3.0
 > **Last Updated**: January 10, 2026
+
+---
+
+## 🚀 Rate Limiting
+- **Global API**: 100 requests per minute
+- **Trading API (`/orders`)**: 10,000 requests per minute (~160 req/sec) to support high-frequency trading.
 
 ---
 
@@ -244,6 +250,48 @@ GET /market/stocks/MICH/orderbook?limit=10
 - `asks`: Sell orders (sorted ascending by price - lowest first)
 - `totalQty`: Total quantity at that price level (in lots)
 - `count`: Number of orders at that price level
+
+---
+
+### Get Order Queue Detail (FIFO Inspection)
+**GET** `/market/queue/:symbol`
+
+> 📝 **Note**: Mengambil detail antrean order pada harga tertentu untuk melihat urutan prioritas (First-In-First-Out).
+
+**Query Parameters:**
+- `price` (required): Harga yang ingin dicek antreannya.
+
+**Example:**
+```
+GET /market/queue/MICH?price=1250
+```
+
+**Response (200):**
+```json
+{
+  "symbol": "MICH",
+  "price": 1250,
+  "queue": [
+    {
+      "orderId": "uuid-1",
+      "userId": "uuid-user-a",
+      "quantity": 10,
+      "timestamp": 1704672000000,
+      "side": "BUY"
+    },
+    {
+      "orderId": "uuid-2",
+      "userId": "uuid-user-b",
+      "quantity": 5,
+      "timestamp": 1704672005000,
+      "side": "BUY"
+    }
+  ]
+}
+```
+
+**Notes:**
+- `queue`: List order diurutkan berdasarkan `timestamp` ASC (Order teratas adalah yang akan match duluan).
 
 ---
 
