@@ -19,6 +19,8 @@ export interface IStock {
     symbol: string;
     name: string;
     is_active: boolean;
+    max_shares: number;    // The limit
+    total_shares: number;  // The calculated amount in circulation
 }
 
 // 3. Data Harian (ARA/ARB Logic)

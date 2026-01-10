@@ -2,7 +2,7 @@
 
 > **Base URL**: `http://localhost:3000/api`
 > **Version**: 1.2.0
-> **Last Updated**: January 8, 2026
+> **Last Updated**: January 10, 2026
 
 ---
 
@@ -14,9 +14,13 @@
 5. [Portfolio](#portfolio)
 6. [Watchlist](#watchlist)
 7. [Admin & Session Management](#admin--session-management)
-8. [User Management (Admin Only)](#user-management-admin-only)
-9. [WebSocket Events](#websocket-events)
-10. [Error Codes](#error-codes)
+8. [Stock Management (Admin Only)](#stock-management-admin-only)
+9. [User Management (Admin Only)](#user-management-admin-only)
+10. [Bot Management (Admin Only)](#-bot-management-admin-only)
+11. [Order & Trade Management (Admin Only)](#-order--trade-management-admin-only)
+12. [Matching Engine Management (Admin Only)](#-matching-engine-management-admin-only)
+13. [WebSocket Events](#websocket-events)
+14. [Error Codes](#error-codes)
 
 ---
 
@@ -134,6 +138,8 @@
     "symbol": "MICH",
     "name": "PT. Michael Kurniawan Asia Tbk",
     "is_active": true,
+    "max_shares": 1000000,
+    "total_shares": 500000,
     "lastPrice": 1250.00,
     "prevClose": 1200.00,
     "change": 50.00,
@@ -318,7 +324,7 @@ GET /market/stocks/MICH/orderbook?limit=10
 
 **Notes:**
 - Refunds RDN for BUY orders
-- Returns stocks to portfolio for SELL orders
+- For SELL orders, the stocks were never deducted from the portfolio (only locked in the orderbook), so cancellation simply releases the lock without needing a refund update to the portfolio table.
 - Only cancels PENDING or PARTIAL orders
 
 ---
@@ -335,14 +341,24 @@ GET /market/stocks/MICH/orderbook?limit=10
     "symbol": "MICH",
     "session_id": 1,
     "type": "BUY",
-    "price": 1250,
+    "target_price": 1250,
+    "execution_price": 1248.50,
+    "price": 1248.50,
     "quantity": 10,
     "remaining_quantity": 0,
+    "matched_quantity": 10,
     "status": "MATCHED",
     "created_at": "2026-01-07T10:30:00Z"
   }
 ]
 ```
+
+**Fields:**
+- `target_price`: The price you set when placing the order.
+- `execution_price` / `price`: The average price at which the order was actually executed.
+- `quantity`: Total lots requested.
+- `remaining_quantity`: Lots not yet filled.
+- `matched_quantity`: Total lots successfully traded (Quantity - Remaining).
 
 **Status Values:**
 - `PENDING`: Order waiting to be matched
@@ -365,10 +381,13 @@ GET /market/stocks/MICH/orderbook?limit=10
     "symbol": "MICH",
     "session_id": 1,
     "type": "SELL",
+    "target_price": 1260,
+    "execution_price": 1260,
     "price": 1260,
     "quantity": 5,
-    "remaining_quantity": 5,
-    "status": "PENDING",
+    "remaining_quantity": 2,
+    "matched_quantity": 3,
+    "status": "PARTIAL",
     "created_at": "2026-01-07T11:00:00Z"
   }
 ]
@@ -573,6 +592,102 @@ DELETE /portfolio/watchlist/MICH
 
 ---
 
+## 🏗️ Stock Management (Admin Only)
+
+### Create New Stock
+**POST** `/admin/stocks`  
+🔒 **Requires Admin Authentication**
+
+**Request Body:**
+```json
+{
+  "symbol": "NEWSTK",
+  "name": "PT New Stock Tbk",
+  "max_shares": 1000000
+}
+```
+
+**Response (200):**
+```json
+{
+  "message": "Saham berhasil ditambahkan",
+  "stock": {
+    "id": 10,
+    "symbol": "NEWSTK",
+    "name": "PT New Stock Tbk",
+    "max_shares": "1000000",
+    "total_shares": 0,
+    "is_active": true
+  }
+}
+```
+
+---
+
+### Update Stock Data
+**PUT** `/admin/stocks/:id`  
+🔒 **Requires Admin Authentication**
+
+**Request Body (Partial update supported):**
+```json
+{
+  "name": "PT New Stock Updated Tbk",
+  "max_shares": 1500000,
+  "is_active": true
+}
+```
+
+**Response (200):**
+```json
+{
+  "message": "Saham berhasil diperbarui",
+  "stock": {
+    "id": 10,
+    "symbol": "NEWSTK",
+    "name": "PT New Stock Updated Tbk",
+    "max_shares": "1500000",
+    "total_shares": 1000,
+    "is_active": true
+  }
+}
+```
+
+---
+
+### Issue Shares to User
+**POST** `/admin/stocks/:id/issue`  
+🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: This endpoint allows admin to issue shares (IPO/Private Placement) to a specific user. It checks against `max_shares` to prevent over-issuance.
+
+**Request Body:**
+```json
+{
+  "userId": "uuid-here",
+  "quantity": 1000
+}
+```
+
+**Response (200):**
+```json
+{
+  "message": "Saham berhasil di-issue ke user",
+  "portfolio": {
+    "user_id": "uuid-here",
+    "stock_id": 10,
+    "quantity_owned": 1000
+  },
+  "total_shares": 1000,
+  "max_shares": 1500000,
+  "available_supply": 1499000
+}
+```
+
+**Validation:**
+- Fails if `currently_circulating + quantity > max_shares`.
+
+---
+
 ## 👥 User Management (Admin Only)
 
 > ⚠️ **All endpoints in this section require ADMIN role**
@@ -679,8 +794,10 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Adjust User Balance (Admin Only)
-**PUT** `/auth/admin/users/:userId/balance`
+**PUT** `/admin/users/:userId/balance`
 🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: Mengubah saldo RDN user secara manual.
 
 **Request Body:**
 ```json
@@ -691,52 +808,456 @@ DELETE /portfolio/watchlist/MICH
 ```
 
 **Fields:**
-- `amount`: Number of RDN to add (positive) or deduct (negative); zero is rejected
-- `reason`: Optional text for auditing/logging, trims leading/trailing whitespace
+- `amount`: Jumlah RDN yang akan ditambah (positif) atau dikurangi (negatif).
+- `reason`: Alasan perubahan (opsional).
+
+---
+
+### Adjust User Portfolio (Admin Only)
+**PUT** `/admin/users/:userId/portfolio/:stockId`
+🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: Menambah atau mengurangi jumlah lot saham dalam portfolio user secara manual.
+
+**Request Body:**
+```json
+{
+  "amount": 10,
+  "reason": "Kompensasi error sistem"
+}
+```
+
+**Fields:**
+- `amount`: Jumlah LOT yang akan ditambah (positif) atau dikurangi (negatif).
+- `reason`: Alasan perubahan (opsional).
+
+**Validation:**
+- Jika `amount` positif, total saham beredar tidak boleh melebihi `max_shares` saham tersebut.
+- Jika `amount` negatif, jumlah saham user tidak boleh menjadi kurang dari nol.
 
 **Response (200):**
 ```json
 {
-  "message": "Balance pengguna berhasil diperbarui",
-  "change": 5000000,
-  "reason": "Top up promo",
-  "user": {
-    "id": "uuid-here",
+  "message": "Portfolio pengguna berhasil diperbarui",
+  "change": 10,
+  "symbol": "MICH",
+  "newQuantity": 15,
+  "reason": "Kompensasi error sistem"
+}
+```
+
+---
+
+## 🤖 Bot Management (Admin Only)
+
+> ⚠️ **All endpoints in this section require ADMIN role**
+> 
+> **Purpose**: Bot Management API memungkinkan admin untuk mengisi orderbook dengan synthetic orders (bot orders) untuk menciptakan likuiditas pasar awal. Bot orders tidak terkait dengan akun user real dan tidak memengaruhi database users/portfolios.
+
+### Key Features:
+- **Synthetic Liquidity**: Mengisi orderbook dengan bid/ask tanpa memerlukan akun user asli.
+- **Market-Making**: Menyebar orders di sekitar harga referensi dengan distribusi realistis.
+- **Realtime Broadcast**: Bot orders langsung muncul di layar user secara realtime (WebSocket) tanpa perlu refresh.
+- **Price Levels Distribution**: Mendukung parameter `priceLevels` untuk menentukan seberapa banyak tingkatan harga bid/offer yang dibuat.
+- **Volume Control**: Mengatur jumlah LOT bot menggunakan parameter `minLot` dan `maxLot`.
+- **Max Shares Awareness**: Bot secara otomatis berhenti melakukan SELL (Offer) jika jumlah saham beredar sudah mencapai `max_shares`, namun tetap bisa melakukan BUY (Bid).
+- **Zero User Impact**: Bot orders hanya ada di Redis, tidak memengaruhi portfolio atau balance user.
+
+### Bot Order Behavior:
+- Bot orders dapat di-match dengan user orders.
+- Ketika bot order match dengan user order:
+  - User order diproses normal (portfolio & balance diupdate).
+  - Bot order tidak mengubah database (hanya Redis).
+  - Trade tetap tercatat untuk update harga pasar.
+- Sistem secara otomatis men-trigger **Matching Engine** sesaat setelah bot ditambahkan untuk memastikan sinkronisasi data.
+
+---
+
+### Populate Orderbook for Single Stock
+**POST** `/admin/bot/populate`  
+🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: Mengisi orderbook dengan bot orders untuk satu saham tertentu.
+
+**Request Body:**
+```json
+{
+  "symbol": "MICH",
+  "priceLevels": 5,
+  "minLot": 1,
+  "maxLot": 50,
+  "spreadPercent": 0.5
+}
+```
+
+**Parameters:**
+- `symbol` *(required)*: Symbol saham yang akan diisi bot orders.
+- `priceLevels` *(optional, default: 5)*: Jumlah tingkatan harga bid & offer yang ingin dibuat.
+- `minLot` *(optional, default: 1)*: Jumlah lot minimum per order.
+- `maxLot` *(optional, default: 10)*: Jumlah lot maksimum per order.
+- `spreadPercent` *(optional, default: 0.5)*: Selisih harga bid tertinggi dan offer terendah.
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "symbol": "MICH",
+  "priceLevels": 5,
+  "ordersCreated": 24,
+  "referencePrice": 1250,
+  "circulatingShares": 500000,
+  "maxShares": 1000000,
+  "sellSideActive": true
+}
+```
+
+**Error Responses:**
+```json
+{
+  "error": "Stock MICH tidak ditemukan"
+}
+```
+
+**Example Usage:**
+```bash
+# Populate dengan 5 harga bid & 5 harga offer
+curl -X POST http://localhost:3000/api/admin/bot/populate \
+  -H "Authorization: Bearer {admin-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "MICH",
+    "priceLevels": 5
+  }'
+```
+
+---
+
+### Populate Orderbook for All Active Stocks
+**POST** `/admin/bot/populate-all`  
+🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: Mengisi orderbook untuk semua saham aktif sekaligus.
+
+**Request Body (optional):**
+```json
+{
+  "priceLevels": 5,
+  "spreadPercent": 0.5
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "totalStocks": 10,
+  "results": [...]
+}
+```
+
+---
+
+### Clear Bot Orders
+**DELETE** `/admin/bot/clear`  
+🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: Menghapus semua bot orders. Aksi ini juga akan men-trigger update realtime ke client untuk membersihkan tampilan orderbook.
+
+**Query Parameters:**
+- `symbol` *(optional)*: Jika diisi, hanya clear bot orders untuk symbol tertentu.
+
+**Example Usage:**
+```bash
+# Clear semua bot saham MICH dan broadcast ke user
+curl -X DELETE "http://localhost:3000/api/admin/bot/clear?symbol=MICH" \
+  -H "Authorization: Bearer {admin-token}"
+```
+
+---
+
+### Get Orderbook Statistics
+**GET** `/admin/bot/stats/:symbol`  
+🔒 **Requires Admin Authentication**
+
+> 📝 **Note**: Melihat statistik perbandingan bot vs user orders.
+
+**Response (200):**
+```json
+{
+  "symbol": "MICH",
+  "buy": { "total": 25, "bot": 15, "user": 10 },
+  "sell": { "total": 20, "bot": 12, "user": 8 },
+  "total": { "total": 45, "bot": 27, "user": 18 }
+}
+```
+
+**Example Usage:**
+```bash
+curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
+  -H "Authorization: Bearer {admin-token}"
+```
+
+---
+
+### Bot Management Workflow
+
+**Recommended workflow untuk memulai session baru:**
+
+1. **Open Session**: 
+   ```bash
+   POST /api/admin/session/open
+   ```
+
+2. **Populate Bot Orders untuk semua saham**:
+   ```bash
+   POST /api/admin/bot/populate-all
+   # Body: { "minOrders": 10, "maxOrders": 20 }
+   ```
+
+3. **Cek Statistics** (optional):
+   ```bash
+   GET /api/admin/bot/stats/MICH
+   ```
+
+4. **User mulai trading**: User orders akan match dengan bot orders atau user orders lainnya
+
+5. **Clear Bot Orders** (optional, jika ingin reset):
+   ```bash
+   DELETE /api/admin/bot/clear
+   ```
+
+6. **Refresh Bot Orders** (optional, untuk variasi):
+   ```bash
+   DELETE /api/admin/bot/clear
+   POST /api/admin/bot/populate-all
+   ```
+
+---
+
+### Bot Order Technical Details
+
+**Bot Order Format di Redis:**
+```json
+{
+  "orderId": "BOT-BUY-{uuid}",
+  "userId": "SYSTEM_BOT",
+  "stockId": 1,
+  "sessionId": 5,
+  "type": "BUY",
+  "price": 1245,
+  "quantity": 50,
+  "remaining": 50,
+  "timestamp": 1736380800000
+}
+```
+
+**Matching Engine Behavior:**
+- Bot orders participate in normal matching process
+- When bot order matches with user order:
+  - User gets normal portfolio/balance updates
+  - Bot order disappears from orderbook (no DB updates needed)
+  - Price update broadcasts to all connected clients
+- When bot order matches with another bot order:
+  - Both orders are removed from orderbook
+  - Only price update is broadcasted (no portfolio changes)
+
+**Tick Size Compliance:**
+- Bot orders automatically comply with tick size rules:
+  - Price < 200: tick size = 1
+  - Price 200-500: tick size = 2
+  - Price 500-2000: tick size = 5
+  - Price 2000-5000: tick size = 10
+  - Price > 5000: tick size = 25
+
+**Volume Limits:**
+- Bot orders are volume-aware
+- Each order quantity is random between 1 and 5% of `max_shares` (dalam satuan LOT)
+- 1 LOT = 100 shares
+- Prevents unrealistic large orders that would distort market
+- Example: If `max_shares` = 1,000,000, max bot order = 50,000 shares = 500 lots
+
+---
+
+## 🧾 Order & Trade Management (Admin Only)
+
+### List All Orders
+**GET** `/admin/orders`  
+🔒 **Requires Admin Authentication**
+
+**Query Parameters:**
+- `status` (optional): `PENDING`, `MATCHED`, `PARTIAL`, `CANCELED`, `REJECTED`
+- `symbol` (optional): Stock symbol (e.g., `MICH`)
+- `limit` (optional): Default `100`
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "user_id": "uuid",
     "username": "johndoe",
-    "full_name": "John Doe",
-    "balance_rdn": 105000000,
-    "role": "USER",
-    "created_at": "2026-01-07T10:00:00Z"
+    "stock_id": 1,
+    "symbol": "MICH",
+    "type": "BUY",
+    "price": "1250.00",
+    "quantity": 10,
+    "remaining_quantity": 5,
+    "status": "PARTIAL",
+    "created_at": "2026-01-09T10:00:00Z"
+  }
+]
+```
+
+---
+
+### List All Trades
+**GET** `/admin/trades`  
+🔒 **Requires Admin Authentication**
+
+**Query Parameters:**
+- `limit` (optional): Default `100`
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "buy_order_id": "uuid",
+    "sell_order_id": "uuid",
+    "buyer": "johndoe",
+    "seller": "janedoe",
+    "symbol": "MICH",
+    "price": "1250.00",
+    "quantity": 5,
+    "executed_at": "2026-01-09T10:05:00Z"
+  }
+]
+```
+
+---
+
+## ⚡ Matching Engine Management (Admin Only)
+
+> ⚠️ **All endpoints in this section require ADMIN role**
+>
+> **Purpose**: Monitor and manage the Matching Engine performance, health, and circuit breaker states. Critical for troubleshooting high-frequency trading issues (100+ TPS).
+
+### Key Features:
+- **Real-time Monitoring**: Track transactions per second (TPS), match counts, error rates
+- **Circuit Breaker Management**: Prevent cascading failures
+- **Health Checks**: Redis connectivity and database pool statistics
+- **Orderbook Validation**: Detect corrupt or stale orders
+- **Performance Optimization**: Handle 100+ transactions per second
+
+---
+
+### Get Matching Engine Statistics
+**GET** `/admin/engine/stats`  
+🔒 **Requires Admin Authentication**
+
+**Response (200):**
+```json
+{
+  "matchesProcessed": 1240,
+  "tradesExecuted": 856,
+  "errors": 3,
+  "circuitBroken": 0,
+  "lockTimeouts": 2,
+  "retries": 15,
+  "activeSymbols": ["MICH", "INDO"],
+  "circuitBreakers": {
+    "TLKM": "HALF_OPEN"
   }
 }
 ```
 
-**Validation & Notes:**
-- `amount` must be a non-zero number; negative values deduct balance if the resulting balance stays ≥ 0
-- Requests without `reason` still succeed and return `null` for the reason field
-- Attempts that would make the balance negative return `400` with `Balance tidak boleh negatif`
-- Attempts with `amount` equal to `0` return `400` with `Amount tidak boleh nol`
-- Always include `Authorization: Bearer {token}` header from an admin session
-- Use this endpoint when adjusting user RDN for promos, penalties, or corrections
+---
 
-**Example (curl):**
-```bash
-curl -X PUT \
-  http://localhost:3000/api/auth/admin/users/9167fa5d-8c50-4459-aeef-a361866659d7/balance \
-  -H "Authorization: Bearer {admin-token}" \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 2500000, "reason": "Kompensasi error perdagangan"}'
-```
+### System Health Check
+**GET** `/admin/health`  
+🔒 **Requires Admin Authentication**
 
-**Error Responses (400):**
+**Response (200):**
 ```json
 {
-  "error": "Amount tidak boleh nol"
+  "status": "healthy",
+  "timestamp": 1736467200000,
+  "stats": {
+    "matchesProcessed": 1240,
+    "tradesExecuted": 856,
+    "errors": 3
+  },
+  "redisConnected": true,
+  "dbPoolStats": {
+    "total": 20,
+    "idle": 15,
+    "waiting": 0
+  }
 }
 ```
+
+---
+
+### Validate Orderbook Integrity
+**GET** `/admin/orderbook/validate?symbol=MICH`  
+🔒 **Requires Admin Authentication**
+
+**Response (200):**
 ```json
 {
-  "error": "Balance tidak boleh negatif"
+  "success": true,
+  "symbol": "MICH",
+  "healthy": true,
+  "totalBuyOrders": 47,
+  "totalSellOrders": 52,
+  "validBuyOrders": 47,
+  "validSellOrders": 52,
+  "issues": {
+    "buy": [],
+    "sell": []
+  }
+}
+```
+
+---
+
+### Reset Circuit Breaker
+**POST** `/admin/engine/reset-circuit`  
+🔒 **Requires Admin Authentication**
+
+**Request Body:**
+```json
+{
+  "symbol": "MICH"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Circuit breaker reset for MICH"
+}
+```
+
+---
+
+### Force Broadcast Orderbook Update
+**POST** `/admin/engine/force-broadcast`  
+🔒 **Requires Admin Authentication**
+
+**Request Body:**
+```json
+{
+  "symbol": "MICH"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Orderbook broadcast sent for MICH"
 }
 ```
 
@@ -921,6 +1442,13 @@ The matching engine follows the **FIFO (First In, First Out)** principle:
 When a buy order price is greater than or equal to a sell order price, a trade occurs. The execution price is determined by the **Passive Order (Maker)**:
 *   **Passive Order**: The order that was already sitting in the orderbook/queue.
 *   **Aggressive Order**: The incoming order that triggers the match.
+
+### Portfolio & Asset Locking
+1.  **BUY Orders**: RDN balance is **immediately deducted** (locked) upon placing the order to ensure payment capability. If execution price is lower than bid price, the difference is refunded.
+2.  **SELL Orders**: Stock quantity is **NOT deducted** from the portfolio upon placing the order. Instead, it is "Locked" by the system.
+    *   Validation: `Total Owned - Total in Active Sell Orders >= Requested New Sell Quantity`.
+    *   The portfolio view (`/portfolio`) will continue to show the total `quantity_owned` until a trade actually occurs.
+    *   Stocks are only finally deducted from the seller's portfolio when a match (trade) is executed.
 
 **Trade Scenarios:**
 
@@ -1107,6 +1635,17 @@ CREATE TABLE users (
     balance_rdn   NUMERIC(19,4) DEFAULT 0,
     role          VARCHAR(20) DEFAULT 'USER' CHECK (role IN ('USER', 'ADMIN')),
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Stocks Table
+```sql
+CREATE TABLE stocks (
+    id           SERIAL PRIMARY KEY,
+    symbol       VARCHAR(10) UNIQUE NOT NULL,
+    name         VARCHAR(100) NOT NULL,
+    is_active    BOOLEAN DEFAULT true,
+    max_shares   BIGINT DEFAULT 0
 );
 ```
 

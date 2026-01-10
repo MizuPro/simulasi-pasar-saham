@@ -19,3 +19,15 @@ services:
     restart: always
     ports:
       - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 2gb
+      --maxmemory-policy noeviction
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --slowlog-log-slower-than 10000
+    volumes:
+      - ./redis_data:/data

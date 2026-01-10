@@ -9,7 +9,9 @@ create table public.users
     balance_rdn   numeric(19, 4) default 0
         constraint users_balance_rdn_check
             check (balance_rdn >= (0)::numeric),
-    created_at    timestamp      default CURRENT_TIMESTAMP
+    created_at    timestamp      default CURRENT_TIMESTAMP,
+    constraint users_role_check
+        check ((role)::text = ANY ((ARRAY ['USER'::character varying, 'ADMIN'::character varying])::text[]))
 );
 
 alter table public.users
@@ -17,12 +19,13 @@ alter table public.users
 
 create table public.stocks
 (
-    id        serial
+    id           serial
         primary key,
-    symbol    varchar(10)  not null
+    symbol       varchar(10)  not null
         unique,
-    name      varchar(100) not null,
-    is_active boolean default true
+    name         varchar(100) not null,
+    is_active    boolean        default true,
+    max_shares   bigint         default 0
 );
 
 alter table public.stocks
@@ -92,7 +95,8 @@ create table public.orders
         constraint orders_status_check
             check ((status)::text = ANY
                    ((ARRAY ['PENDING'::character varying, 'MATCHED'::character varying, 'PARTIAL'::character varying, 'CANCELED'::character varying, 'REJECTED'::character varying])::text[])),
-    created_at         timestamp   default CURRENT_TIMESTAMP
+    created_at         timestamp   default CURRENT_TIMESTAMP,
+    updated_at         timestamp   default CURRENT_TIMESTAMP
 );
 
 alter table public.orders
@@ -156,52 +160,3 @@ alter table public.stock_candles
 create index idx_candles_stock_time
     on public.stock_candles (stock_id, start_time);
 
--- Tabel candles untuk multi-timeframe support (1m, 5m, 15m, 1h, 1d)
-create table public.candles
-(
-    id          serial
-        primary key,
-    stock_id    integer        not null
-        references public.stocks
-            on delete cascade,
-    timeframe   varchar(5)     not null default '1m',
-    open_price  numeric(15, 2) not null,
-    high_price  numeric(15, 2) not null,
-    low_price   numeric(15, 2) not null,
-    close_price numeric(15, 2) not null,
-    volume      integer        not null default 0,
-    timestamp   timestamp      not null,
-    created_at  timestamp      default now(),
-    unique (stock_id, timeframe, timestamp)
-);
-
-alter table public.candles
-    owner to michael;
-
-create index idx_candles_multi_timeframe
-    on public.candles (stock_id, timeframe, timestamp);
-
--- Tabel watchlists untuk menyimpan saham favorit user
-create table public.watchlists
-(
-    id         serial
-        primary key,
-    user_id    uuid        not null
-        references public.users
-            on delete cascade,
-    stock_id   integer     not null
-        references public.stocks
-            on delete cascade,
-    created_at timestamp   default now(),
-    unique (user_id, stock_id)
-);
-
-alter table public.watchlists
-    owner to michael;
-
-create index idx_watchlists_user
-    on public.watchlists (user_id);
-
--- Tambah kolom filled_quantity dan average_price pada orders (jika belum ada)
--- ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS filled_quantity integer default 0;
--- ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS average_price numeric(19, 4);

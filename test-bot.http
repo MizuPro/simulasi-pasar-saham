@@ -1,0 +1,142 @@
+### Test Bot Management API
+### Requires admin login
+
+# @name adminLogin
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin1234"
+}
+
+> {%
+    // Menyimpan token ke dalam variabel global 'admin_token'
+    if (response.status === 200) {
+        client.global.set("admin_token", response.body.token);
+    }
+%}
+
+###
+
+### 2. Open Trading Session
+# Menggunakan endpoint /admin/session/open sesuai dokumentasi
+POST http://localhost:3000/api/admin/session/open
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+###
+
+### 3. Populate Bot Orders untuk Single Stock
+POST http://localhost:3000/api/admin/bot/populate
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "symbol": "DAMN"
+}
+
+###
+
+### 4. Populate Bot Orders dengan Custom Parameters
+POST http://localhost:3000/api/admin/bot/populate
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "symbol": "DAMN",
+  "priceLevels": 10,
+  "minLot": 5,
+  "maxLot": 50,
+  "spreadPercent": 0.3
+}
+
+###
+
+### 5. Populate Bot Orders untuk Semua Saham Aktif
+POST http://localhost:3000/api/admin/bot/populate-all
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "priceLevels": 5,
+  "minLot": 1,
+  "maxLot": 20,
+  "spreadPercent": 0.5
+}
+
+###
+
+### 6. Get Orderbook Statistics untuk MICH
+GET http://localhost:3000/api/admin/bot/stats/MICH
+Authorization: Bearer {{admin_token}}
+
+###
+
+### 7. Clear Bot Orders untuk Single Stock
+DELETE http://localhost:3000/api/admin/bot/clear?symbol=DAMN
+Authorization: Bearer {{admin_token}}
+
+###
+
+### 8. Clear All Bot Orders
+DELETE http://localhost:3000/api/admin/bot/clear
+Authorization: Bearer {{admin_token}}
+
+###
+
+### 9. View Orderbook (Public Endpoint)
+# Sesuai dokumentasi: /market/stocks/:symbol/orderbook
+GET http://localhost:3000/api/market/stocks/MICH/orderbook
+Authorization: Bearer {{admin_token}}
+
+###
+
+### 10. Populate Bot Orders dengan Spread Percent 0.5%
+POST http://localhost:3000/api/admin/bot/populate
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "symbol": "DAMN",
+  "priceLevels": 50,
+  "spreadPercent": 0.5
+}
+
+###
+
+POST http://localhost:3000/api/admin/bot/populate
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "symbol": "DAMN",
+  "priceLevels": 10,
+  "minLot": 50,
+  "maxLot": 500,
+  "spreadPercent": 0.3
+}
+
+###
+
+### 11. Test Bot Sell Orders Limit - Validasi bahwa total sell orders + portfolio user tidak melebihi max_shares
+# Pertama, cek stats untuk melihat total bot sell orders
+GET http://localhost:3000/api/admin/bot/stats/DAMN
+Authorization: Bearer {{admin_token}}
+
+###
+
+### 12. Populate lagi untuk test limit
+# Jika sudah penuh, seharusnya tidak bisa menambah sell orders lagi
+POST http://localhost:3000/api/admin/bot/populate
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "symbol": "BMKU",
+  "priceLevels": 20,
+  "minLot": 100,
+  "maxLot": 800,
+  "spreadPercent": 0.5
+}
+

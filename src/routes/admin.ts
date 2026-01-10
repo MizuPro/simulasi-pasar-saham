@@ -6,6 +6,8 @@ import redis from '../config/redis';
 import { calculateLimits, getTickSize } from '../core/market-logic';
 import { adminAuth, AuthRequest } from '../middlewares/auth';
 import { AuthService } from '../services/auth-service';
+import { BotService } from '../services/bot-service';
+import { MatchingEngine } from '../core/matching-engine';
 
 const router = Router();
 
@@ -167,12 +169,8 @@ router.post('/session/close', adminAuth, async (req: AuthRequest, res: Response)
                     [refund, order.user_id]
                 );
             } else if (order.type === 'SELL') {
-                // Kembalikan saham ke portfolio
-                await client.query(`
-                    /* dialect: postgres */
-                    UPDATE portfolios SET quantity_owned = quantity_owned + $1
-                    WHERE user_id = $2 AND stock_id = $3
-                `, [remainingQty, order.user_id, order.stock_id]);
+                // TIDAK PERLU kembalikan saham ke portfolio karena sekarang saham tidak dikurangi saat pasang order
+                // Saham hanya dikurangi saat MATCH terjadi di Matching Engine.
             }
 
             // Update status order
@@ -277,7 +275,10 @@ router.get('/stocks', async (req: Request, res: Response) => {
     try {
         const result = await pool.query(`
             /* dialect: postgres */
-            SELECT s.*, d.prev_close, d.ara_limit, d.arb_limit, d.open_price, d.close_price
+            SELECT 
+                s.*, 
+                (SELECT COALESCE(SUM(quantity_owned), 0) FROM portfolios WHERE stock_id = s.id) as total_shares,
+                d.prev_close, d.ara_limit, d.arb_limit, d.open_price, d.close_price
             FROM stocks s
             LEFT JOIN daily_stock_data d ON s.id = d.stock_id
                 AND d.session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
@@ -322,6 +323,476 @@ router.put('/users/:userId/balance', adminAuth, async (req: AuthRequest, res: Re
             return res.status(400).json({ error: err.message });
         }
         res.status(500).json({ error: 'Gagal memperbarui balance: ' + err.message });
+    }
+});
+
+// PUT /api/admin/users/:userId/portfolio/:stockId - Ubah jumlah saham pengguna (ADMIN ONLY)
+router.put('/users/:userId/portfolio/:stockId', adminAuth, async (req: AuthRequest, res: Response) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { userId, stockId } = req.params;
+        const { amount, reason } = req.body;
+
+        if (typeof amount !== 'number' || Number.isNaN(amount)) {
+            throw new Error('amount wajib berupa angka (lot)');
+        }
+
+        if (amount === 0) {
+            throw new Error('amount tidak boleh nol');
+        }
+
+        // 1. Cek stok saham & max_shares (jika menambah)
+        const stockRes = await client.query('SELECT * FROM stocks WHERE id = $1 FOR UPDATE', [stockId]);
+        if ((stockRes.rowCount ?? 0) === 0) throw new Error('Saham tidak ditemukan');
+        const stock = stockRes.rows[0];
+
+        // 2. Jika menambah, cek limit max_shares
+        if (amount > 0) {
+            const circulatingRes = await client.query('SELECT SUM(quantity_owned) as total FROM portfolios WHERE stock_id = $1', [stockId]);
+            const circulating = parseInt(circulatingRes.rows[0].total || '0');
+
+            if (circulating + amount > parseInt(stock.max_shares)) {
+                throw new Error(`Gagal menambah: Total saham beredar akan melebihi batas maximal (${stock.max_shares} lot). Saat ini beredar: ${circulating} lot.`);
+            }
+        }
+
+        // 2a. Jika mengurangi, cek apakah user memiliki saham yang cukup
+        if (amount < 0) {
+            const currentPortfolioRes = await client.query('SELECT quantity_owned FROM portfolios WHERE user_id = $1 AND stock_id = $2', [userId, stockId]);
+
+            if (currentPortfolioRes.rowCount === 0) {
+                throw new Error('User tidak memiliki saham ini sama sekali');
+            }
+
+            const currentQuantity = parseInt(currentPortfolioRes.rows[0].quantity_owned || '0');
+            if (currentQuantity + amount < 0) { // amount sudah negatif
+                throw new Error(`Jumlah saham tidak cukup untuk dikurangi. User memiliki ${currentQuantity} lot, diminta mengurangi ${Math.abs(amount)} lot.`);
+            }
+        }
+
+        // 3. Update atau Insert ke portfolio user
+        const portfolioRes = await client.query(`
+            /* dialect: postgres */
+            INSERT INTO portfolios (user_id, stock_id, quantity_owned)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, stock_id) 
+            DO UPDATE SET quantity_owned = portfolios.quantity_owned + EXCLUDED.quantity_owned
+            RETURNING *
+        `, [userId, stockId, amount]);
+
+        const updatedPortfolio = portfolioRes.rows[0];
+
+        // 4. Jika quantity jadi 0, biarkan saja atau bisa dihapus.
+        // Tapi constraint check(quantity_owned >= 0) akan melempar error jika amount negatif membuat qty < 0.
+
+        await client.query('COMMIT');
+
+        console.log(`📊 Admin ${req.userId} adjust portfolio for ${userId}: stock ${stock.symbol}, change ${amount} lot. reason=${reason || 'n/a'}`);
+
+        res.json({
+            message: 'Portfolio pengguna berhasil diperbarui',
+            change: amount,
+            symbol: stock.symbol,
+            newQuantity: updatedPortfolio.quantity_owned,
+            reason: reason || null
+        });
+    } catch (err: any) {
+        await client.query('ROLLBACK');
+        if (err.message.includes('portfolios_quantity_owned_check')) {
+            return res.status(400).json({ error: 'Jumlah saham tidak cukup untuk dikurangi' });
+        }
+        res.status(400).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// POST /api/admin/stocks - Tambah saham baru (ADMIN ONLY)
+router.post('/stocks', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol, name, max_shares } = req.body;
+
+        if (!symbol || !name) {
+            return res.status(400).json({ error: 'Symbol dan Name wajib diisi' });
+        }
+
+        const result = await pool.query(`
+            /* dialect: postgres */
+            INSERT INTO stocks (symbol, name, max_shares)
+            VALUES ($1, $2, $3)
+            RETURNING *
+        `, [symbol.toUpperCase(), name, max_shares || 0]);
+
+        res.json({
+            message: 'Saham berhasil ditambahkan',
+            stock: {
+                ...result.rows[0],
+                total_shares: 0 // New stock has 0 circulating shares
+            }
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Gagal menambahkan saham: ' + err.message });
+    }
+});
+
+// PUT /api/admin/stocks/:id - Update data saham (ADMIN ONLY)
+router.put('/stocks/:id', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { symbol, name, max_shares, is_active } = req.body;
+
+        const result = await pool.query(`
+            /* dialect: postgres */
+            UPDATE stocks
+            SET symbol = COALESCE($1, symbol),
+                name = COALESCE($2, name),
+                max_shares = COALESCE($3, max_shares),
+                is_active = COALESCE($4, is_active)
+            WHERE id = $5
+            RETURNING *
+        `, [symbol?.toUpperCase(), name, max_shares, is_active, id]);
+
+        if ((result.rowCount ?? 0) === 0) {
+            return res.status(404).json({ error: 'Saham tidak ditemukan' });
+        }
+
+        // Get circulating shares
+        const circulatingRes = await pool.query('SELECT SUM(quantity_owned) as total FROM portfolios WHERE stock_id = $1', [id]);
+        const circulating = parseInt(circulatingRes.rows[0].total || '0');
+
+        res.json({
+            message: 'Saham berhasil diperbarui',
+            stock: {
+                ...result.rows[0],
+                total_shares: circulating
+            }
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Gagal memperbarui saham: ' + err.message });
+    }
+});
+
+// POST /api/admin/stocks/:id/issue - Berikan saham ke user (ADMIN ONLY)
+router.post('/stocks/:id/issue', adminAuth, async (req: AuthRequest, res: Response) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { id } = req.params; // stock_id
+        const { userId, quantity } = req.body; // quantity dalam LOT
+
+        if (!userId || !quantity || quantity <= 0) {
+            throw new Error('UserId dan quantity (positif) wajib diisi');
+        }
+
+        // 1. Cek stok saham & max_shares
+        const stockRes = await client.query('SELECT * FROM stocks WHERE id = $1 FOR UPDATE', [id]);
+        if ((stockRes.rowCount ?? 0) === 0) throw new Error('Saham tidak ditemukan');
+        const stock = stockRes.rows[0];
+
+        // 2. Cek total saham yang sudah beredar saat ini
+        const circulatingRes = await client.query('SELECT SUM(quantity_owned) as total FROM portfolios WHERE stock_id = $1', [id]);
+        const circulating = parseInt(circulatingRes.rows[0].total || '0');
+
+        if (circulating + quantity > parseInt(stock.max_shares)) {
+            throw new Error(`Gagal issue: Total saham beredar akan melebihi batas maximal (${stock.max_shares} lot). Saat ini beredar: ${circulating} lot.`);
+        }
+
+        // 3. Tambahkan ke portfolio user
+        const portfolioRes = await client.query(`
+            /* dialect: postgres */
+            INSERT INTO portfolios (user_id, stock_id, quantity_owned)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, stock_id) 
+            DO UPDATE SET quantity_owned = portfolios.quantity_owned + EXCLUDED.quantity_owned
+            RETURNING *
+        `, [userId, id, quantity]);
+
+        await client.query('COMMIT');
+
+        res.json({
+            message: 'Saham berhasil di-issue ke user',
+            portfolio: portfolioRes.rows[0],
+            total_shares: circulating + quantity,
+            max_shares: parseInt(stock.max_shares),
+            available_supply: parseInt(stock.max_shares) - (circulating + quantity)
+        });
+    } catch (err: any) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// GET /api/admin/users - Daftar semua user (ADMIN ONLY)
+router.get('/users', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, username, full_name, balance_rdn, role, created_at
+            FROM users
+            ORDER BY created_at DESC
+        `);
+        res.json(result.rows);
+    } catch (err: any) {
+        res.status(500).json({ error: 'Gagal mengambil data user: ' + err.message });
+    }
+});
+
+// GET /api/admin/orders - Daftar semua order terbaru (ADMIN ONLY)
+router.get('/orders', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { status, symbol, limit = 100 } = req.query;
+        let query = `
+            SELECT o.*, s.symbol, u.username
+            FROM orders o
+            JOIN stocks s ON o.stock_id = s.id
+            JOIN users u ON o.user_id = u.id
+            WHERE 1=1
+        `;
+        const params: any[] = [];
+
+        if (status) {
+            params.push(status);
+            query += ` AND o.status = $${params.length}`;
+        }
+        if (symbol) {
+            params.push(symbol);
+            query += ` AND s.symbol = $${params.length}`;
+        }
+
+        query += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1}`;
+        params.push(limit);
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err: any) {
+        res.status(500).json({ error: 'Gagal mengambil data order: ' + err.message });
+    }
+});
+
+// GET /api/admin/trades - Daftar semua trade terbaru (ADMIN ONLY)
+router.get('/trades', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { limit = 100 } = req.query;
+        const result = await pool.query(`
+            SELECT t.*, s.symbol, 
+                   bu.username as buyer, su.username as seller
+            FROM trades t
+            JOIN orders bo ON t.buy_order_id = bo.id
+            JOIN orders so ON t.sell_order_id = so.id
+            JOIN stocks s ON bo.stock_id = s.id
+            JOIN users bu ON bo.user_id = bu.id
+            JOIN users su ON so.user_id = su.id
+            ORDER BY t.executed_at DESC
+            LIMIT $1
+        `, [limit]);
+        res.json(result.rows);
+    } catch (err: any) {
+        res.status(500).json({ error: 'Gagal mengambil data trade: ' + err.message });
+    }
+});
+
+// ========================================
+// BOT MANAGEMENT ENDPOINTS
+// ========================================
+
+// POST /api/admin/bot/populate - Isi orderbook dengan bot orders untuk symbol tertentu
+router.post('/bot/populate', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol, minLot, maxLot, spreadPercent, priceLevels } = req.body;
+
+        if (!symbol) {
+            return res.status(400).json({ error: 'Symbol diperlukan' });
+        }
+
+        const result = await BotService.populateOrderbook(symbol, {
+            minLot,
+            maxLot,
+            spreadPercent,
+            priceLevels
+        });
+
+        // Trigger matching engine agar terpantau realtime di user
+        await MatchingEngine.match(symbol);
+
+        res.json(result);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/admin/bot/populate-all - Isi orderbook untuk semua saham aktif
+router.post('/bot/populate-all', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { minLot, maxLot, spreadPercent, priceLevels } = req.body;
+
+        const result = await BotService.populateAllStocks({
+            minLot,
+            maxLot,
+            spreadPercent,
+            priceLevels
+        });
+
+        // Trigger matching engine untuk semua saham yang baru diisi
+        const stocksRes = await pool.query('SELECT symbol FROM stocks WHERE is_active = true');
+        for (const stock of stocksRes.rows) {
+            await MatchingEngine.match(stock.symbol);
+        }
+
+        res.json(result);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/admin/bot/clear - Hapus bot orders dari orderbook
+router.delete('/bot/clear', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol } = req.query;
+
+        const result = await BotService.clearBotOrders(symbol as string | undefined);
+
+        // Jika symbol spesifik diclear, broadcast update
+        if (symbol) {
+            await MatchingEngine.match(symbol as string);
+        } else {
+            // Jika semua diclear, broadcast semua
+            const stocksRes = await pool.query('SELECT symbol FROM stocks WHERE is_active = true');
+            for (const stock of stocksRes.rows) {
+                await MatchingEngine.match(stock.symbol);
+            }
+        }
+
+        res.json(result);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/admin/bot/stats/:symbol - Dapatkan statistik orderbook (bot vs user)
+router.get('/bot/stats/:symbol', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol } = req.params;
+
+        const stats = await BotService.getOrderbookStats(symbol);
+
+        res.json(stats);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/admin/bot/supply/:symbol - Cek supply saham (beredar vs max)
+router.get('/bot/supply/:symbol', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol } = req.params;
+        const supplyInfo = await BotService.getStockSupplyInfo(symbol);
+        res.json(supplyInfo);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/admin/health - System health check (ADMIN ONLY)
+router.get('/health', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const healthResult = await MatchingEngine.healthCheck();
+
+        res.json({
+            status: healthResult.healthy ? 'healthy' : 'unhealthy',
+            timestamp: Date.now(),
+            ...healthResult.details
+        });
+    } catch (err: any) {
+        res.status(500).json({
+            status: 'error',
+            error: err.message
+        });
+    }
+});
+
+// GET /api/admin/engine/stats - Matching engine stats (ADMIN ONLY)
+router.get('/engine/stats', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const stats = MatchingEngine.getStats();
+        res.json(stats);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/admin/engine/reset-circuit - Reset circuit breaker (ADMIN ONLY)
+router.post('/engine/reset-circuit', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol } = req.body;
+        MatchingEngine.resetCircuitBreaker(symbol);
+        res.json({
+            success: true,
+            message: symbol
+                ? `Circuit breaker reset for ${symbol}`
+                : 'All circuit breakers reset'
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/admin/orderbook/validate - Validasi integritas orderbook (ADMIN ONLY)
+router.get('/orderbook/validate', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol } = req.query;
+        if (!symbol) return res.status(400).json({ error: 'Symbol diperlukan' });
+
+        const [buyOrders, sellOrders] = await Promise.all([
+            redis.zrange(`orderbook:${symbol}:buy`, 0, -1),
+            redis.zrange(`orderbook:${symbol}:sell`, 0, -1)
+        ]);
+
+        const validate = (orders: string[]) => {
+            const issues = [];
+            for (const o of orders) {
+                try {
+                    const parsed = JSON.parse(o);
+                    if (!parsed.orderId || !parsed.userId || !parsed.price) issues.push(o);
+                } catch {
+                    issues.push(o);
+                }
+            }
+            return issues;
+        };
+
+        const buyIssues = validate(buyOrders);
+        const sellIssues = validate(sellOrders);
+
+        res.json({
+            success: true,
+            symbol,
+            healthy: buyIssues.length === 0 && sellIssues.length === 0,
+            totalBuyOrders: buyOrders.length,
+            totalSellOrders: sellOrders.length,
+            validBuyOrders: buyOrders.length - buyIssues.length,
+            validSellOrders: sellOrders.length - sellIssues.length,
+            issues: {
+                buy: buyIssues,
+                sell: sellIssues
+            }
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/admin/engine/force-broadcast - Paksa broadcast orderbook (ADMIN ONLY)
+router.post('/engine/force-broadcast', adminAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { symbol } = req.body;
+        if (!symbol) return res.status(400).json({ error: 'Symbol diperlukan' });
+
+        await MatchingEngine.forceBroadcast(symbol);
+        res.json({ success: true, message: `Force broadcast sent for ${symbol}` });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
     }
 });
 

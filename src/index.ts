@@ -4,8 +4,8 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import pool from './config/database';
-import redis from './config/redis';
+import pool, { closePool } from './config/database';
+import redis, { redisLock } from './config/redis';
 import cron from 'node-cron';
 import rateLimit from 'express-rate-limit';
 
@@ -164,6 +164,8 @@ process.on('SIGINT', async () => {
 
 async function gracefulShutdown() {
     try {
+        console.log('🔄 Starting graceful shutdown...');
+
         // Close HTTP server first
         httpServer.close(() => {
             console.log('✅ HTTP server closed');
@@ -175,13 +177,17 @@ async function gracefulShutdown() {
         });
 
         // Close database pool
-        await pool.end();
+        await closePool();
         console.log('✅ Database pool closed');
 
-        // Close Redis connection
-        redis.disconnect();
-        console.log('✅ Redis connection closed');
+        // Close all Redis connections
+        await redis.quit();
+        console.log('✅ Redis main connection closed');
 
+        await redisLock.quit();
+        console.log('✅ Redis lock connection closed');
+
+        console.log('✅ Graceful shutdown completed');
         process.exit(0);
     } catch (error) {
         console.error('❌ Error during shutdown:', error);

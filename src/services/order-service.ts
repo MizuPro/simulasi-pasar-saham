@@ -14,12 +14,12 @@ export class OrderService {
 
             // 1. Ambil data saham & harga ARA/ARB sesi ini
             const stockRes = await client.query(`
-                /* dialect: postgres */
-                SELECT s.id, d.ara_limit, d.arb_limit, d.session_id
-                FROM stocks s
-                JOIN daily_stock_data d ON s.id = d.stock_id
-                WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
-            `, [symbol]);
+/* dialect: postgres */
+SELECT s.id, d.ara_limit, d.arb_limit, d.session_id
+FROM stocks s
+JOIN daily_stock_data d ON s.id = d.stock_id
+WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
+`, [symbol]);
 
             if ((stockRes.rowCount ?? 0) === 0) throw new Error('Saham tidak ditemukan atau bursa sedang tutup');
             const stock = stockRes.rows[0];
@@ -45,38 +45,44 @@ export class OrderService {
                     [totalCost, userId]
                 );
             } else if (type === 'SELL') {
-                // 3b. SELL: Cek kepemilikan saham & Lock saham
+                // 3b. SELL: Cek kepemilikan saham
                 const portfolioRes = await client.query(`
-                    /* dialect: postgres */
-                    SELECT quantity_owned FROM portfolios
-                    WHERE user_id = $1 AND stock_id = $2
-                    FOR UPDATE
-                `, [userId, stock.id]);
+/* dialect: postgres */
+SELECT quantity_owned FROM portfolios
+WHERE user_id = $1 AND stock_id = $2
+FOR UPDATE
+`, [userId, stock.id]);
 
                 if ((portfolioRes.rowCount ?? 0) === 0) {
                     throw new Error('Anda tidak memiliki saham ini');
                 }
 
                 const ownedQty = parseInt(portfolioRes.rows[0].quantity_owned);
-                if (ownedQty < quantity) {
-                    throw new Error(`Jumlah saham tidak cukup. Anda hanya punya ${ownedQty} lot`);
+
+                // Hitung total lot yang sudah masuk antrean jual (Pending/Partial)
+                const lockedRes = await client.query(`
+/* dialect: postgres */
+SELECT SUM(remaining_quantity) as locked_qty
+FROM orders
+WHERE user_id = $1 AND stock_id = $2 AND type = 'SELL' AND status IN ('PENDING', 'PARTIAL')
+`, [userId, stock.id]);
+
+                const lockedQty = parseInt(lockedRes.rows[0].locked_qty || '0');
+
+                if (ownedQty - lockedQty < quantity) {
+                    throw new Error(`Jumlah saham tidak cukup. Anda punya ${ownedQty} lot, tapi ${lockedQty} lot sudah ada di antrean jual.`);
                 }
 
-                // Kurangi (lock) saham dari portfolio
-                await client.query(`
-                    /* dialect: postgres */
-                    UPDATE portfolios SET quantity_owned = quantity_owned - $1
-                    WHERE user_id = $2 AND stock_id = $3
-                `, [quantity, userId, stock.id]);
+                // JANGAN kurangi saham dari portfolio di sini.
             }
 
             // 4. Simpan Order ke Database (Status PENDING)
             const orderRes = await client.query(`
-                /* dialect: postgres */
-                INSERT INTO orders (user_id, stock_id, session_id, type, price, quantity, remaining_quantity, status)
-                VALUES ($1, $2, $3, $4, $5, $6, $6, 'PENDING')
-                RETURNING id
-            `, [userId, stock.id, stock.session_id, type, price, quantity]);
+/* dialect: postgres */
+INSERT INTO orders (user_id, stock_id, session_id, type, price, quantity, remaining_quantity, status)
+VALUES ($1, $2, $3, $4, $5, $6, $6, 'PENDING')
+RETURNING id
+`, [userId, stock.id, stock.session_id, type, price, quantity]);
 
             const orderId = orderRes.rows[0].id;
 
@@ -91,13 +97,17 @@ export class OrderService {
                 quantity,
                 timestamp,
                 remaining_quantity: quantity
+
             });
 
             const redisKey = `orderbook:${symbol}:${type.toLowerCase()}`;
             await redis.zadd(redisKey, price, redisPayload);
 
+            console.log(`📝 Order placed: ${type} ${symbol} @ ${price} x ${quantity} lots (ID: ${orderId})`);
+
             // Panggil Engine tanpa await (Background Process)
             MatchingEngine.match(symbol);
+            console.log(`🚀 Matching Engine triggered for ${symbol}`);
 
             return { orderId, status: 'PENDING', message: 'Order berhasil dipasang' };
         } catch (err: any) {
@@ -117,12 +127,12 @@ export class OrderService {
 
             // 1. Ambil data order
             const orderRes = await client.query(`
-                /* dialect: postgres */
-                SELECT o.*, s.symbol FROM orders o
-                JOIN stocks s ON o.stock_id = s.id
-                WHERE o.id = $1 AND o.user_id = $2
-                FOR UPDATE
-            `, [orderId, userId]);
+/* dialect: postgres */
+SELECT o.*, s.symbol FROM orders o
+JOIN stocks s ON o.stock_id = s.id
+WHERE o.id = $1 AND o.user_id = $2
+FOR UPDATE
+`, [orderId, userId]);
 
             if ((orderRes.rowCount ?? 0) === 0) {
                 throw new Error('Order tidak ditemukan');
@@ -145,17 +155,12 @@ export class OrderService {
                     [refundAmount, userId]
                 );
             } else if (order.type === 'SELL') {
-                // Kembalikan saham ke portfolio
-                await client.query(`
-                    /* dialect: postgres */
-                    UPDATE portfolios SET quantity_owned = quantity_owned + $1
-                    WHERE user_id = $2 AND stock_id = $3
-                `, [remainingQty, userId, order.stock_id]);
+                // Tidak perlu kembalikan saham ke portfolio karena belum dikurangi saat pasang order
             }
 
             // 3. Update status order jadi CANCELED
             await client.query(
-                "UPDATE orders SET status = 'CANCELED' WHERE id = $1",
+                "UPDATE orders SET status = 'CANCELED', updated_at = NOW() WHERE id = $1",
                 [orderId]
             );
 
@@ -185,61 +190,66 @@ export class OrderService {
     // Ambil history order user
     static async getOrderHistory(userId: string) {
         const result = await pool.query(`
-            /* dialect: postgres */
-            SELECT 
-                o.id, 
-                s.symbol, 
-                o.type, 
-                o.price as target_price, 
-                COALESCE(AVG(t.price), o.price) as execution_price,
-                o.quantity, 
-                o.remaining_quantity,
-                o.status, 
-                o.created_at, 
-                o.session_id
-            FROM orders o
-            JOIN stocks s ON o.stock_id = s.id
-            LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
-            WHERE o.user_id = $1
-            GROUP BY o.id, s.symbol
-            ORDER BY o.created_at DESC
-            LIMIT 100
-        `, [userId]);
+/* dialect: postgres */
+SELECT
+o.id,
+s.symbol,
+o.type,
+o.price as target_price,
+COALESCE(AVG(t.price), o.price) as execution_price,
+o.quantity,
+o.remaining_quantity,
+(o.quantity - o.remaining_quantity) as matched_quantity,
+o.status,
+o.created_at,
+o.session_id
+FROM orders o
+JOIN stocks s ON o.stock_id = s.id
+LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
+WHERE o.user_id = $1
+GROUP BY o.id, s.symbol
+ORDER BY o.created_at DESC
+LIMIT 100
+`, [userId]);
 
         return result.rows.map(row => ({
             ...row,
             price: parseFloat(row.execution_price),
-            target_price: parseFloat(row.target_price)
+            target_price: parseFloat(row.target_price),
+            matched_quantity: parseInt(row.matched_quantity)
         }));
     }
 
     // Ambil order aktif (PENDING/PARTIAL) user
     static async getActiveOrders(userId: string) {
         const result = await pool.query(`
-            /* dialect: postgres */
-            SELECT 
-                o.id, 
-                s.symbol, 
-                o.type, 
-                o.price as target_price,
-                COALESCE(AVG(t.price), o.price) as execution_price,
-                o.quantity, 
-                o.remaining_quantity,
-                o.status, 
-                o.created_at, 
-                o.session_id
-            FROM orders o
-            JOIN stocks s ON o.stock_id = s.id
-            LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
-            WHERE o.user_id = $1 AND o.status IN ('PENDING', 'PARTIAL')
-            GROUP BY o.id, s.symbol
-            ORDER BY o.created_at DESC
-        `, [userId]);
+/* dialect: postgres */
+SELECT
+o.id,
+s.symbol,
+o.type,
+o.price as target_price,
+COALESCE(AVG(t.price), o.price) as execution_price,
+o.quantity,
+o.remaining_quantity,
+(o.quantity - o.remaining_quantity) as matched_quantity,
+o.status,
+o.created_at,
+o.session_id
+FROM orders o
+JOIN stocks s ON o.stock_id = s.id
+LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
+WHERE o.user_id = $1 AND o.status IN ('PENDING', 'PARTIAL')
+GROUP BY o.id, s.symbol
+ORDER BY o.created_at DESC
+`, [userId]);
 
         return result.rows.map(row => ({
             ...row,
             price: parseFloat(row.execution_price),
-            target_price: parseFloat(row.target_price)
+            target_price: parseFloat(row.target_price),
+            matched_quantity: parseInt(row.matched_quantity)
         }));
     }
+
 }
