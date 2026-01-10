@@ -64,8 +64,8 @@ const generalLimiter = rateLimit({
 
 const tradingLimiter = rateLimit({
     windowMs: 60000, // 1 minute
-    max: 300, // Lebih longgar untuk bot (rata-rata 5 req/detik)
-    message: { error: 'Bot trading Anda terlalu cepat (max 300/menit)' },
+    max: 10000, // 10,000 requests per minute (approx 160 req/sec) to support high throughput
+    message: { error: 'Bot trading Anda terlalu cepat (max 10000/menit)' },
     standardHeaders: true,
     legacyHeaders: false,
 });
