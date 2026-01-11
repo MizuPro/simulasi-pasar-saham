@@ -4,6 +4,7 @@ import time
 import random
 import threading
 from datetime import datetime
+from market_events import EventManager
 
 # Configuration
 API_URL = "http://localhost:3000/api"
@@ -88,6 +89,7 @@ class MarketSimulator:
         self.bots = []
         self.active_stocks = []
         self.is_running = False
+        self.event_manager = EventManager()
 
     def load_bots(self):
         try:
@@ -145,6 +147,10 @@ class MarketSimulator:
                 time.sleep(5)
                 continue
 
+            # Update Events
+            active_symbols = [s['symbol'] for s in self.active_stocks]
+            self.event_manager.update(active_symbols)
+
             # Shuffle bots to make it random who acts first
             random.shuffle(self.bots)
 
@@ -165,13 +171,57 @@ class MarketSimulator:
 
                 action_delay = random.uniform(TICK_DELAY_MIN, TICK_DELAY_MAX)
 
-                if bot.role == "BANDAR":
-                    self.execute_bandar_logic(bot, stock, ob, best_bid, best_ask)
-                else:
-                    self.execute_retail_logic(bot, stock, ob, best_bid, best_ask)
+                # Check for Active Event
+                event_type = self.event_manager.get_event(symbol)
 
-                # Sleep between bots to spread load
-                time.sleep(action_delay / len(self.bots))
+                if event_type:
+                    self.execute_event_logic(bot, stock, ob, best_bid, best_ask, event_type)
+                else:
+                    if bot.role == "BANDAR":
+                        self.execute_bandar_logic(bot, stock, ob, best_bid, best_ask)
+                    else:
+                        self.execute_retail_logic(bot, stock, ob, best_bid, best_ask)
+
+                # Sleep between bots to spread load. Max 0.1s to avoid being too slow with many bots
+                sleep_time = max(0.01, min(0.1, action_delay / len(self.bots)))
+                time.sleep(sleep_time)
+
+    def execute_event_logic(self, bot, stock, ob, best_bid, best_ask, event_type):
+        symbol = stock['symbol']
+        ara = float(stock.get('ara', 0))
+        arb = float(stock.get('arb', 0))
+
+        # Determine quantity (Aggressive)
+        qty = random.randint(10, 50) if bot.role == "RETAIL" else random.randint(500, 2000)
+
+        if event_type == "ARA":
+            # Force Buy at ARA or Best Ask
+            # 80% Buy at ARA to lock it, 20% HAKA
+            price = ara if random.random() < 0.8 else best_ask
+            bot.place_order(symbol, "BUY", price, qty)
+
+        elif event_type == "BULLISH":
+            # 80% Buy Bias (HAKA or Bid)
+            if random.random() < 0.8:
+                 bot.place_order(symbol, "BUY", best_ask, qty) # HAKA
+            else:
+                 # Small chance to sell to create volume
+                 if symbol in bot.portfolio:
+                    bot.place_order(symbol, "SELL", best_ask + self.get_tick_size(best_ask), qty)
+
+        elif event_type == "BEARISH":
+            # 80% Sell Bias (HAKI or Offer)
+            if symbol in bot.portfolio and random.random() < 0.8:
+                 bot.place_order(symbol, "SELL", best_bid, qty) # HAKI
+            else:
+                 # Buy low to catch
+                 bot.place_order(symbol, "BUY", best_bid - self.get_tick_size(best_bid), qty)
+
+        elif event_type == "ARB":
+            # Force Sell at ARB
+            if symbol in bot.portfolio:
+                price = arb if random.random() < 0.8 else best_bid
+                bot.place_order(symbol, "SELL", price, qty)
 
     def execute_bandar_logic(self, bot, stock, ob, best_bid, best_ask):
         # Bandar Logic: Move the market or create walls
