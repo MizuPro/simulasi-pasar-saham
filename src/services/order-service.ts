@@ -93,6 +93,7 @@ RETURNING id
             const redisPayload = JSON.stringify({
                 orderId,
                 userId,
+                stockId: stock.id,
                 price,
                 quantity,
                 timestamp,
