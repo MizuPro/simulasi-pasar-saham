@@ -270,7 +270,8 @@ export class MarketService {
                     return {
                         orderId: data.orderId,
                         userId: data.userId, // Include user ID to see ownership
-                        quantity: data.remaining_quantity || data.quantity,
+                        quantity: data.quantity,
+                        remaining_quantity: data.remaining_quantity ?? data.quantity,
                         timestamp: data.timestamp,
                         side: side
                     };

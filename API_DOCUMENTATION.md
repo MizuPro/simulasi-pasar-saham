@@ -276,13 +276,15 @@ GET /market/queue/MICH?price=1250
       "orderId": "uuid-1",
       "userId": "uuid-user-a",
       "quantity": 10,
+      "remaining_quantity": 10,
       "timestamp": 1704672000000,
       "side": "BUY"
     },
     {
       "orderId": "uuid-2",
       "userId": "uuid-user-b",
-      "quantity": 5,
+      "quantity": 25,
+      "remaining_quantity": 25,
       "timestamp": 1704672005000,
       "side": "BUY"
     }
@@ -292,6 +294,8 @@ GET /market/queue/MICH?price=1250
 
 **Notes:**
 - `queue`: List order diurutkan berdasarkan `timestamp` ASC (Order teratas adalah yang akan match duluan).
+- `quantity`: Total lot awal yang dipesan.
+- `remaining_quantity`: Sisa lot yang sedang mengantre.
 
 ---
 
