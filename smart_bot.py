@@ -20,10 +20,12 @@ class BotAgent:
         self.token = None
         self.portfolio = {} # Local cache of portfolio
         self.rdn = 0
+        self.session = requests.Session()
+        self.trade_count = 0
 
     def login(self):
         try:
-            res = requests.post(f"{API_URL}/auth/login", json={
+            res = self.session.post(f"{API_URL}/auth/login", json={
                 "username": self.username,
                 "password": self.password
             })
@@ -42,7 +44,7 @@ class BotAgent:
     def refresh_portfolio(self):
         if not self.token: return
         try:
-            res = requests.get(f"{API_URL}/portfolio", headers={"Authorization": f"Bearer {self.token}"})
+            res = self.session.get(f"{API_URL}/portfolio", headers={"Authorization": f"Bearer {self.token}"})
             if res.status_code == 200:
                 data = res.json()
                 self.rdn = float(data['balance_rdn'])
@@ -60,7 +62,9 @@ class BotAgent:
                 # print(f"[{self.username}] Insufficient funds for {side} {symbol}")
                 return
         elif side == "SELL":
-            if symbol not in self.portfolio or self.portfolio[symbol]['quantity_owned'] < quantity:
+            # Check if we have enough shares
+            stock_data = self.portfolio.get(symbol)
+            if not stock_data or stock_data['quantity_owned'] < quantity:
                 # print(f"[{self.username}] Not enough shares to {side} {symbol}")
                 return
 
@@ -71,18 +75,45 @@ class BotAgent:
                 "price": int(price),
                 "quantity": int(quantity)
             }
-            res = requests.post(f"{API_URL}/orders",
+            res = self.session.post(f"{API_URL}/orders",
                               headers={"Authorization": f"Bearer {self.token}"},
                               json=payload)
 
             if res.status_code == 200:
                 print(f"[{self.username}] {side} {symbol} @ {price} x {quantity} Lots - OK")
-                self.refresh_portfolio() # Update balance/shares
+
+                # OPTIMIZATION: Manually update local state instead of fetching API
+                self._update_local_portfolio(symbol, side, price, quantity)
+
+                # Sync with server only occasionally (every 20 trades) to correct drifts
+                self.trade_count += 1
+                if self.trade_count % 20 == 0:
+                    self.refresh_portfolio()
             else:
                 # print(f"[{self.username}] {side} Failed: {res.text}")
                 pass
         except Exception as e:
             print(f"[{self.username}] Order Error: {e}")
+
+    def _update_local_portfolio(self, symbol, side, price, quantity):
+        cost = price * quantity * 100
+
+        if side == "BUY":
+            self.rdn -= cost
+            if symbol not in self.portfolio:
+                self.portfolio[symbol] = {'symbol': symbol, 'quantity_owned': 0, 'avg_buy_price': 0}
+
+            # Simple avg price calculation (approximate)
+            current_qty = self.portfolio[symbol]['quantity_owned']
+            # We don't have accurate avg price without old total cost, but let's just update qty
+            self.portfolio[symbol]['quantity_owned'] += quantity
+
+        elif side == "SELL":
+            self.rdn += cost
+            if symbol in self.portfolio:
+                self.portfolio[symbol]['quantity_owned'] -= quantity
+                if self.portfolio[symbol]['quantity_owned'] <= 0:
+                    del self.portfolio[symbol]
 
 class MarketSimulator:
     def __init__(self):
@@ -90,6 +121,13 @@ class MarketSimulator:
         self.active_stocks = []
         self.is_running = False
         self.event_manager = EventManager()
+        self.session = requests.Session()
+
+        # Caching
+        self.last_stocks_update = 0
+        self.stocks_cache_ttl = 10 # Seconds
+        self.orderbook_cache = {}
+        self.orderbook_cache_ttl = 0.5 # Seconds
 
     def load_bots(self):
         try:
@@ -106,21 +144,33 @@ class MarketSimulator:
             exit(1)
 
     def update_market_data(self):
-        # Admin token not needed for public stocks endpoint usually,
-        # but let's assume we can hit public /stocks
+        # Optimization: Only update active stocks list every 10 seconds
+        if time.time() - self.last_stocks_update < self.stocks_cache_ttl:
+            return
+
         try:
-            res = requests.get(f"{API_URL}/stocks")
+            res = self.session.get(f"{API_URL}/stocks")
             if res.status_code == 200:
                 all_stocks = res.json()
                 self.active_stocks = [s for s in all_stocks if s.get('is_active', True)]
+                self.last_stocks_update = time.time()
         except:
             pass
 
     def get_orderbook(self, symbol):
+        # Optimization: Cache orderbook for short duration
+        now = time.time()
+        if symbol in self.orderbook_cache:
+            cache_entry = self.orderbook_cache[symbol]
+            if now - cache_entry['time'] < self.orderbook_cache_ttl:
+                return cache_entry['data']
+
         try:
-            res = requests.get(f"{API_URL}/market/stocks/{symbol}/orderbook")
+            res = self.session.get(f"{API_URL}/market/stocks/{symbol}/orderbook")
             if res.status_code == 200:
-                return res.json()
+                data = res.json()
+                self.orderbook_cache[symbol] = {'time': now, 'data': data}
+                return data
         except:
             pass
         return None
