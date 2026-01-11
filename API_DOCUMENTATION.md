@@ -1701,6 +1701,19 @@ CREATE TABLE stocks (
 );
 ```
 
+### Trades Table
+```sql
+CREATE TABLE trades (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    buy_order_id  UUID REFERENCES orders,  -- Nullable for BOT orders
+    sell_order_id UUID REFERENCES orders,  -- Nullable for BOT orders
+    stock_id      INTEGER NOT NULL REFERENCES stocks,
+    price         NUMERIC(19,4) NOT NULL,
+    quantity      INTEGER NOT NULL,
+    executed_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
 ### Candles Table (Multi-Timeframe)
 ```sql
 CREATE TABLE candles (
