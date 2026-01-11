@@ -15,11 +15,12 @@ export class MarketService {
             for (const stock of stocks.rows) {
                 try {
                     // 2. Ambil trades dalam 1 menit terakhir (Misal sekarang 10:05, ambil data 10:04:00 - 10:04:59)
+                    // REVISI: Menggunakan stock_id langsung di table trades (supaya transaksi bot tercatat)
                     const tradesRes = await client.query(`
                         /* dialect: postgres */
                         SELECT price, quantity, created_at 
                         FROM trades 
-                        WHERE sell_order_id IN (SELECT id FROM orders WHERE stock_id = $1)
+                        WHERE stock_id = $1
                         AND created_at >= date_trunc('minute', NOW()) - INTERVAL '1 minute'
                         AND created_at < date_trunc('minute', NOW())
                         ORDER BY created_at ASC

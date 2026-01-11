@@ -17,6 +17,7 @@ interface CircuitBreaker {
 interface OrderData {
     orderId: string;
     userId: string;
+    stockId: number;
     price: number;
     quantity: number;
     timestamp: number;
@@ -443,13 +444,20 @@ export class MatchingEngine {
             const sellRemaining = sellQtyAvailable - matchQty;
 
             // --- DATABASE UPDATES FIRST ---
-            // 1. Record trade (only for real orders)
-            if (!isBuyBot && !isSellBot) {
-                await client.query(
-                    `INSERT INTO trades (buy_order_id, sell_order_id, price, quantity) VALUES ($1, $2, $3, $4)`,
-                    [buyOrder.orderId, sellOrder.orderId, matchPrice, matchQty]
-                );
-            }
+            // 1. Record trade (Always record trade, even for bots)
+            // Bots will have NULL order_id in trades table
+            await client.query(
+                `INSERT INTO trades (buy_order_id, sell_order_id, stock_id, price, quantity)
+                 VALUES ($1, $2, COALESCE($3, (SELECT id FROM stocks WHERE symbol = $6)), $4, $5)`,
+                [
+                    isBuyBot ? null : buyOrder.orderId,
+                    isSellBot ? null : sellOrder.orderId,
+                    buyOrder.stockId || sellOrder.stockId, // Try to get stockId from order data
+                    matchPrice,
+                    matchQty,
+                    symbol // Fallback symbol lookup if stockId is missing (legacy orders)
+                ]
+            );
 
             // 2. Update orders in database
             if (!isBuyBot) {

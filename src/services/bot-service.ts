@@ -3,6 +3,7 @@
 import pool from '../config/database';
 import redis, { redisPipeline } from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
+import { getTickSize } from '../core/market-logic';
 
 export class BotService {
     /**
@@ -53,6 +54,11 @@ export class BotService {
                 priceLevels = 5
             } = options || {};
 
+            // Validation
+            if (minLot < 1) throw new Error('minLot must be >= 1');
+            if (maxLot < minLot) throw new Error('maxLot must be >= minLot');
+            if (priceLevels < 1) throw new Error('priceLevels must be >= 1');
+
             // 1. Ambil info stock
             const stockRes = await client.query('SELECT id, symbol, max_shares FROM stocks WHERE symbol = $1 AND is_active = true', [symbol]);
             if (stockRes.rowCount === 0) throw new Error(`Stock ${symbol} tidak ditemukan`);
@@ -74,13 +80,17 @@ export class BotService {
             try {
                 const existingSellOrders = await redis.zrange(`orderbook:${symbol}:sell`, 0, -1);
                 for (const orderStr of existingSellOrders) {
-                    const order = JSON.parse(orderStr);
-                    if (order.userId === 'SYSTEM_BOT' || order.orderId.startsWith('BOT-')) {
-                        totalBotSellLot += order.remaining_quantity || order.quantity || 0;
+                    try {
+                        const order = JSON.parse(orderStr);
+                        if (order.userId === 'SYSTEM_BOT' || (order.orderId && order.orderId.startsWith('BOT-'))) {
+                            totalBotSellLot += order.remaining_quantity || order.quantity || 0;
+                        }
+                    } catch (e) {
+                        // Ignore parse error
                     }
                 }
             } catch (err) {
-                // Jika error saat baca Redis, asumsikan 0
+                console.error(`Error calculating bot sell lots for ${symbol}:`, err);
                 totalBotSellLot = 0;
             }
 
@@ -97,7 +107,7 @@ export class BotService {
             const referencePrice = parseFloat(dailyData.close_price || dailyData.prev_close);
             const araLimit = parseFloat(dailyData.ara_limit);
             const arbLimit = parseFloat(dailyData.arb_limit);
-            const tickSize = this.getTickSize(referencePrice);
+            const tickSize = getTickSize(referencePrice);
 
             const timestamp = Date.now();
             const buyOrders = [];
@@ -174,7 +184,7 @@ export class BotService {
                 pipelineCommands.push([
                     'zadd',
                     `orderbook:${symbol}:${order.type.toLowerCase()}`,
-                    order.price,
+                    order.price.toString(), // Ensure string for score (redis convention, though number works in node-redis)
                     JSON.stringify(orderData)
                 ]);
                 inserted++;
@@ -205,16 +215,8 @@ export class BotService {
         }
     }
 
-    private static getTickSize(price: number): number {
-        if (price < 200) return 1;
-        if (price < 500) return 2;
-        if (price < 2000) return 5;
-        if (price < 5000) return 10;
-        return 25;
-    }
-
     private static roundToTickSize(price: number): number {
-        const tick = this.getTickSize(price);
+        const tick = getTickSize(price);
         return Math.round(price / tick) * tick;
     }
 
@@ -277,7 +279,7 @@ export class BotService {
                 for (const orderStr of buyOrders) {
                     try {
                         const order = JSON.parse(orderStr);
-                        if (order.userId === 'SYSTEM_BOT' || order.orderId?.startsWith('BOT-')) {
+                        if (order.userId === 'SYSTEM_BOT' || (order.orderId && order.orderId.startsWith('BOT-'))) {
                             pipelineCommands.push(['zrem', `orderbook:${symbol}:buy`, orderStr]);
                         }
                     } catch { /* skip corrupt data */ }
@@ -286,7 +288,7 @@ export class BotService {
                 for (const orderStr of sellOrders) {
                     try {
                         const order = JSON.parse(orderStr);
-                        if (order.userId === 'SYSTEM_BOT' || order.orderId?.startsWith('BOT-')) {
+                        if (order.userId === 'SYSTEM_BOT' || (order.orderId && order.orderId.startsWith('BOT-'))) {
                             pipelineCommands.push(['zrem', `orderbook:${symbol}:sell`, orderStr]);
                         }
                     } catch { /* skip corrupt data */ }
@@ -340,7 +342,7 @@ export class BotService {
                 totalBuy++;
                 const order = JSON.parse(buyOrders[i]);
                 const lot = order.remaining_quantity || order.quantity || 0;
-                if (order.userId === 'SYSTEM_BOT' || order.orderId.startsWith('BOT-')) {
+                if (order.userId === 'SYSTEM_BOT' || (order.orderId && order.orderId.startsWith('BOT-'))) {
                     botBuy++;
                     botBuyLot += lot;
                 } else {
@@ -359,7 +361,7 @@ export class BotService {
                 totalSell++;
                 const order = JSON.parse(sellOrders[i]);
                 const lot = order.remaining_quantity || order.quantity || 0;
-                if (order.userId === 'SYSTEM_BOT' || order.orderId.startsWith('BOT-')) {
+                if (order.userId === 'SYSTEM_BOT' || (order.orderId && order.orderId.startsWith('BOT-'))) {
                     botSell++;
                     botSellLot += lot;
                 } else {
@@ -400,4 +402,3 @@ export class BotService {
         }
     }
 }
-

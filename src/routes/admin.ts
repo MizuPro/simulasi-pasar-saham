@@ -222,8 +222,8 @@ router.post('/session/close', adminAuth, async (req: AuthRequest, res: Response)
     }
 });
 
-// GET /api/admin/orderbook/:symbol - Lihat orderbook (bid/ask)
-router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
+// GET /api/admin/orderbook/:symbol - Lihat orderbook (bid/ask) - ADMIN AUTH
+router.get('/orderbook/:symbol', adminAuth, async (req: AuthRequest, res: Response) => {
     try {
         const symbol = req.params.symbol;
 
@@ -270,8 +270,8 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
     }
 });
 
-// GET /api/admin/stocks - Daftar semua saham (untuk admin)
-router.get('/stocks', async (req: Request, res: Response) => {
+// GET /api/admin/stocks - Daftar semua saham (untuk admin) - ADMIN AUTH
+router.get('/stocks', adminAuth, async (req: AuthRequest, res: Response) => {
     try {
         const result = await pool.query(`
             /* dialect: postgres */
@@ -575,15 +575,17 @@ router.get('/orders', adminAuth, async (req: AuthRequest, res: Response) => {
 router.get('/trades', adminAuth, async (req: AuthRequest, res: Response) => {
     try {
         const { limit = 100 } = req.query;
+        // REVISI: Handle nullable buy_order_id/sell_order_id (BOT) dan gunakan stock_id langsung dari trades
         const result = await pool.query(`
             SELECT t.*, s.symbol, 
-                   bu.username as buyer, su.username as seller
+                   COALESCE(bu.username, 'SYSTEM_BOT') as buyer,
+                   COALESCE(su.username, 'SYSTEM_BOT') as seller
             FROM trades t
-            JOIN orders bo ON t.buy_order_id = bo.id
-            JOIN orders so ON t.sell_order_id = so.id
-            JOIN stocks s ON bo.stock_id = s.id
-            JOIN users bu ON bo.user_id = bu.id
-            JOIN users su ON so.user_id = su.id
+            LEFT JOIN orders bo ON t.buy_order_id = bo.id
+            LEFT JOIN orders so ON t.sell_order_id = so.id
+            JOIN stocks s ON t.stock_id = s.id
+            LEFT JOIN users bu ON bo.user_id = bu.id
+            LEFT JOIN users su ON so.user_id = su.id
             ORDER BY t.executed_at DESC
             LIMIT $1
         `, [limit]);
