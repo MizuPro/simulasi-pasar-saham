@@ -54,14 +54,26 @@ app.use(cors({
 app.use(express.json());
 
 // 2. Setup Middleware Global & Rate Limiting
-const generalLimiter = rateLimit({
+
+// Limit khusus Auth (Login/Register) - Cukup ketat untuk security
+const authLimiter = rateLimit({
     windowMs: 60000, // 1 minute
-    max: 100,
-    message: { error: 'Terlalu banyak request, coba lagi nanti' },
+    max: 200, // 200 requests per minute (approx 3 req/sec)
+    message: { error: 'Terlalu banyak request login/register, coba lagi nanti' },
     standardHeaders: true,
     legacyHeaders: false,
 });
 
+// Limit untuk Data (Market, Stocks, Portfolio) - Lebih longgar untuk BOT/Frontend
+const dataLimiter = rateLimit({
+    windowMs: 60000, // 1 minute
+    max: 5000, // 5,000 requests per minute (approx 83 req/sec)
+    message: { error: 'Terlalu banyak request data, slow down bot!' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Limit khusus Trading (Order) - Sangat longgar untuk High Frequency Trading
 const tradingLimiter = rateLimit({
     windowMs: 60000, // 1 minute
     max: 10000, // 10,000 requests per minute (approx 160 req/sec) to support high throughput
@@ -72,12 +84,14 @@ const tradingLimiter = rateLimit({
 
 // Terapkan limiters secara spesifik sebelum mounting routes
 app.use('/api/orders', tradingLimiter);
-app.use('/api/auth', generalLimiter);
-app.use('/api/market', generalLimiter);
-app.use('/api/admin', generalLimiter);
-// Endpoint lain yang mungkin diakses lewat /api (seperti portfolio)
-app.use('/api/portfolio', generalLimiter);
-app.use('/api/stocks', generalLimiter);
+
+app.use('/api/auth', authLimiter);
+
+// Gunakan dataLimiter untuk endpoint yang sering di-hit bot/dashboard
+app.use('/api/market', dataLimiter);
+app.use('/api/admin', dataLimiter); // Admin juga butuh load data banyak
+app.use('/api/portfolio', dataLimiter);
+app.use('/api/stocks', dataLimiter);
 
 // 3. Cron Job (Jalan tiap 1 MENIT, bukan tiap detik!)
 // PENTING: '*/1 * * * *' = every 1 minute (bukan setiap detik!)
