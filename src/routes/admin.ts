@@ -222,8 +222,8 @@ router.post('/session/close', adminAuth, async (req: AuthRequest, res: Response)
     }
 });
 
-// GET /api/admin/orderbook/:symbol - Lihat orderbook (bid/ask)
-router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
+// GET /api/admin/orderbook/:symbol - Lihat orderbook (bid/ask) - ADMIN AUTH
+router.get('/orderbook/:symbol', adminAuth, async (req: AuthRequest, res: Response) => {
     try {
         const symbol = req.params.symbol;
 
@@ -270,8 +270,8 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
     }
 });
 
-// GET /api/admin/stocks - Daftar semua saham (untuk admin)
-router.get('/stocks', async (req: Request, res: Response) => {
+// GET /api/admin/stocks - Daftar semua saham (untuk admin) - ADMIN AUTH
+router.get('/stocks', adminAuth, async (req: AuthRequest, res: Response) => {
     try {
         const result = await pool.query(`
             /* dialect: postgres */
