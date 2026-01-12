@@ -3,6 +3,9 @@
 import { Router, Request, Response } from 'express';
 import { MarketService } from '../services/market-service';
 import redis from '../config/redis';
+import { IEPEngine } from '../core/iep-engine';
+import { SessionStatus } from '../config/market';
+import pool from '../config/database';
 
 const router = Router();
 
@@ -109,6 +112,43 @@ router.get('/queue/:symbol', async (req: Request, res: Response) => {
         });
     } catch (err) {
         res.status(500).json({ error: 'Gagal mengambil antrean order' });
+    }
+});
+
+// GET /api/market/iep/:symbol - Get current IEP (Pre-Opening/Locked Only)
+router.get('/iep/:symbol', async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol.toUpperCase();
+
+        // Cek Session Status
+        const sessionRes = await pool.query(`
+            SELECT status FROM trading_sessions
+            ORDER BY id DESC LIMIT 1
+        `);
+
+        const status = sessionRes.rows[0]?.status;
+
+        if (status === SessionStatus.PRE_OPEN || status === SessionStatus.LOCKED) {
+            const iepData = await IEPEngine.calculateIEP(symbol);
+            res.json({
+                symbol,
+                iep: iepData ? iepData.price : null,
+                volume: iepData ? iepData.matchedVolume : 0,
+                surplus: iepData ? iepData.surplus : 0,
+                status
+            });
+        } else {
+            // Outside of pre-open/locked, return null as requested
+            res.json({
+                symbol,
+                iep: null,
+                volume: 0,
+                surplus: 0,
+                status
+            });
+        }
+    } catch (err: any) {
+        res.status(500).json({ error: 'Gagal mengambil data IEP' });
     }
 });
 

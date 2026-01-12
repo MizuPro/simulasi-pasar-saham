@@ -8,6 +8,7 @@ import { adminAuth, AuthRequest } from '../middlewares/auth';
 import { AuthService } from '../services/auth-service';
 import { BotService } from '../services/bot-service';
 import { MatchingEngine } from '../core/matching-engine';
+import { MARKET_CONFIG, SessionStatus } from '../config/market';
 
 const router = Router();
 
@@ -37,23 +38,23 @@ router.post('/session/open', adminAuth, async (req: AuthRequest, res: Response) 
     try {
         await client.query('BEGIN');
 
-        // 1. Cek apakah sudah ada sesi yang OPEN
+        // 1. Cek apakah sudah ada sesi yang OPEN / PRE_OPEN / LOCKED
         const existingSession = await client.query(`
             /* dialect: postgres */
-            SELECT id FROM trading_sessions WHERE status = 'OPEN'
+            SELECT id FROM trading_sessions WHERE status IN ('OPEN', 'PRE_OPEN', 'LOCKED')
         `);
 
         if ((existingSession.rowCount ?? 0) > 0) {
             throw new Error('Sudah ada sesi trading yang sedang berjalan');
         }
 
-        // 2. Buat sesi baru dengan session_number otomatis
+        // 2. Buat sesi baru - START with PRE_OPEN
         const sessionRes = await client.query(`
             /* dialect: postgres */
             INSERT INTO trading_sessions (session_number, status, started_at)
             VALUES (
                 COALESCE((SELECT MAX(session_number) FROM trading_sessions), 0) + 1,
-                'OPEN',
+                'PRE_OPEN',
                 NOW()
             )
             RETURNING id, session_number, status, started_at
@@ -117,10 +118,10 @@ router.post('/session/open', adminAuth, async (req: AuthRequest, res: Response) 
         // Update session_id untuk order yang pending dari session sebelumnya
         const prevSessionRes = await client.query(`
             SELECT id FROM trading_sessions
-            WHERE status = 'CLOSED'
+            WHERE status = 'CLOSED' AND id < $1
             ORDER BY ended_at DESC
             LIMIT 1
-        `);
+        `, [session.id]);
 
         if ((prevSessionRes.rowCount ?? 0) > 0) {
             const prevSessionId = prevSessionRes.rows[0].id;
@@ -169,9 +170,51 @@ router.post('/session/open', adminAuth, async (req: AuthRequest, res: Response) 
 
         await client.query('COMMIT');
 
+        // 5. Start State Transitions in Background
+        MatchingEngine.setSessionStatus(SessionStatus.PRE_OPEN);
+
+        const PRE_OPEN_MS = MARKET_CONFIG.PRE_OPEN_DURATION;
+        const LOCKED_MS = MARKET_CONFIG.LOCKED_DURATION;
+
+        console.log(`⏰ Session started: PRE_OPEN (${PRE_OPEN_MS}ms) -> LOCKED (${LOCKED_MS}ms) -> OPEN`);
+
+        setTimeout(async () => {
+            // TRANSITION: PRE_OPEN -> LOCKED
+            console.log('🔒 Entering LOCKED Phase...');
+            MatchingEngine.setSessionStatus(SessionStatus.LOCKED);
+            await pool.query("UPDATE trading_sessions SET status = 'LOCKED' WHERE id = $1", [session.id]);
+
+            // Re-trigger IEP calc for all stocks to ensure display is updated
+            const stocks = await pool.query('SELECT symbol FROM stocks WHERE is_active = true');
+            for (const stock of stocks.rows) {
+                MatchingEngine.match(stock.symbol);
+            }
+
+            setTimeout(async () => {
+                // TRANSITION: LOCKED -> OPEN (Execute IEP)
+                console.log('🔓 Entering OPEN Phase (IEP Execution)...');
+                MatchingEngine.setSessionStatus(SessionStatus.OPEN);
+                await pool.query("UPDATE trading_sessions SET status = 'OPEN' WHERE id = $1", [session.id]);
+
+                // Execute IEP for all stocks
+                const stocks = await pool.query('SELECT symbol FROM stocks WHERE is_active = true');
+                for (const stock of stocks.rows) {
+                    await MatchingEngine.executeIEP(stock.symbol);
+                }
+
+                console.log('✅ Market fully OPEN');
+
+            }, LOCKED_MS);
+        }, PRE_OPEN_MS);
+
         res.json({
-            message: 'Sesi trading berhasil dibuka',
-            session
+            message: 'Sesi trading berhasil dibuka (Pre-Opening)',
+            session,
+            timeline: {
+                preOpen: PRE_OPEN_MS,
+                locked: LOCKED_MS,
+                totalPreOpen: PRE_OPEN_MS + LOCKED_MS
+            }
         });
     } catch (err: any) {
         await client.query('ROLLBACK');
@@ -193,7 +236,7 @@ router.post('/session/close', adminAuth, async (req: AuthRequest, res: Response)
             /* dialect: postgres */
             UPDATE trading_sessions 
             SET status = 'CLOSED', ended_at = NOW()
-            WHERE status = 'OPEN'
+            WHERE status IN ('OPEN', 'PRE_OPEN', 'LOCKED')
             RETURNING id
         `);
 
@@ -202,6 +245,7 @@ router.post('/session/close', adminAuth, async (req: AuthRequest, res: Response)
         }
 
         const sessionId = result.rows[0].id;
+        MatchingEngine.setSessionStatus(SessionStatus.CLOSED);
 
         // 2. Cancel semua order yang masih PENDING/PARTIAL
         // Ambil dulu semua order untuk di-refund
