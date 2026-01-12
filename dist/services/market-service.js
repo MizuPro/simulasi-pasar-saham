@@ -1,64 +1,61 @@
+"use strict";
 //servies/market-service.ts
-
-import pool from '../config/database';
-import redis from '../config/redis';
-
-export class MarketService {
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MarketService = void 0;
+const database_1 = __importDefault(require("../config/database"));
+const redis_1 = __importDefault(require("../config/redis"));
+class MarketService {
     static async generateOneMinuteCandles() {
-        const client = await pool.connect();
+        const client = await database_1.default.connect();
         try {
             console.log('⏳ Generating 1-minute candles...');
-
             // 1. Ambil semua saham aktif
             const stocks = await client.query('SELECT id, symbol FROM stocks WHERE is_active = true');
-
             // 1b. Ambil session aktif saat ini
             const sessionRes = await client.query("SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1");
             const rowCount = sessionRes.rowCount ?? 0;
             const currentSessionId = rowCount > 0 ? sessionRes.rows[0].id : null;
-
             for (const stock of stocks.rows) {
                 try {
                     // 2. Ambil trades dalam 1 menit terakhir (Misal sekarang 10:05, ambil data 10:04:00 - 10:04:59)
                     // REVISI: Menggunakan stock_id langsung di table trades (supaya transaksi bot tercatat)
                     const tradesRes = await client.query(`
                         /* dialect: postgres */
-                        SELECT price, quantity, created_at 
-                        FROM trades 
+                        SELECT price, quantity, created_at
+                        FROM trades
                         WHERE stock_id = $1
                         AND created_at >= date_trunc('minute', NOW()) - INTERVAL '1 minute'
                         AND created_at < date_trunc('minute', NOW())
                         ORDER BY created_at ASC
                     `, [stock.id]);
-
                     const trades = tradesRes.rows;
                     let open, high, low, close, volume;
                     const startTime = new Date();
                     startTime.setMinutes(startTime.getMinutes() - 1);
                     startTime.setSeconds(0);
                     startTime.setMilliseconds(0);
-
                     if (trades.length > 0) {
                         // KASUS A: Ada Transaksi
                         open = parseFloat(trades[0].price);
                         close = parseFloat(trades[trades.length - 1].price);
-
                         // Cari High & Low pakai Math.max/min
-                        const prices = trades.map((t: any) => parseFloat(t.price));
+                        const prices = trades.map((t) => parseFloat(t.price));
                         high = Math.max(...prices);
                         low = Math.min(...prices);
-
                         // Hitung total volume
-                        volume = trades.reduce((sum: number, t: any) => sum + t.quantity, 0);
-                    } else {
+                        volume = trades.reduce((sum, t) => sum + t.quantity, 0);
+                    }
+                    else {
                         // KASUS B: Tidak Ada Transaksi (Gunakan Close candle sebelumnya)
                         const lastCandle = await client.query(`
                             /* dialect: postgres */
-                            SELECT close_price FROM stock_candles 
-                            WHERE stock_id = $1 
+                            SELECT close_price FROM stock_candles
+                            WHERE stock_id = $1
                             ORDER BY start_time DESC LIMIT 1
                         `, [stock.id]);
-
                         // Null-safe guard: ensure lastCandle is not null/undefined before accessing rowCount
                         if ((lastCandle?.rowCount ?? 0) > 0) {
                             const lastPrice = parseFloat(lastCandle.rows[0].close_price);
@@ -67,11 +64,11 @@ export class MarketService {
                             low = lastPrice;
                             close = lastPrice;
                             volume = 0;
-                        } else {
+                        }
+                        else {
                             continue; // Belum ada data sama sekali, skip
                         }
                     }
-
                     // 3. Simpan ke stock_candles (untuk 1-minute raw data)
                     // REVISI: Tambahkan session_id
                     await client.query(`
@@ -79,7 +76,6 @@ export class MarketService {
                         INSERT INTO stock_candles (stock_id, resolution, open_price, high_price, low_price, close_price, volume, start_time, session_id)
                         VALUES ($1, '1M', $2, $3, $4, $5, $6, $7, $8)
                     `, [stock.id, open, high, low, close, volume, startTime, currentSessionId]);
-
                     // 4. Juga simpan ke candles table untuk multi-timeframe support (jika table ada)
                     try {
                         // REVISI: Tambahkan session_id
@@ -95,30 +91,32 @@ export class MarketService {
                                 volume = EXCLUDED.volume,
                                 session_id = EXCLUDED.session_id
                         `, [stock.id, open, high, low, close, volume, startTime, currentSessionId]);
-                    } catch (err: any) {
-                        // Skip jika table candles belum ada
-                        if (err.code !== '42P01') throw err;
                     }
-
+                    catch (err) {
+                        // Skip jika table candles belum ada
+                        if (err.code !== '42P01')
+                            throw err;
+                    }
                     console.log(`🕯️ Candle generated for ${stock.symbol}: O:${open} H:${high} L:${low} C:${close} V:${volume} (Session: ${currentSessionId})`);
-                } catch (stockErr) {
+                }
+                catch (stockErr) {
                     console.error(`❌ Error processing stock ${stock.symbol}:`, stockErr);
                     // Continue to next stock
                 }
             }
-
             // 5. Generate candles untuk timeframe lain (5m, 15m, 1h, 1d)
             await this.aggregateCandles(client, currentSessionId);
-        } catch (err) {
+        }
+        catch (err) {
             console.error('❌ Error generating candles:', err);
-        } finally {
+        }
+        finally {
             // CRITICAL: Always release the client
             client.release();
         }
     }
-
     // Aggregate candles dari 1m ke timeframe yang lebih besar
-    private static async aggregateCandles(client: any, sessionId: number | null) {
+    static async aggregateCandles(client, sessionId) {
         try {
             const timeframes = [
                 { name: '5m', minutes: 5 },
@@ -126,9 +124,7 @@ export class MarketService {
                 { name: '1h', minutes: 60 },
                 { name: '1d', minutes: 1440 }
             ];
-
             const stocks = await client.query('SELECT id FROM stocks WHERE is_active = true');
-
             for (const stock of stocks.rows) {
                 for (const tf of timeframes) {
                     // Ambil candles 1m dalam range waktu tertentu
@@ -138,22 +134,20 @@ export class MarketService {
                     startOfPeriod.setMinutes(Math.floor(now.getMinutes() / interval) * interval - interval, 0, 0);
                     const endOfPeriod = new Date(startOfPeriod);
                     endOfPeriod.setMinutes(startOfPeriod.getMinutes() + interval);
-
                     const candlesRes = await client.query(`
                         /* dialect: postgres */
-                        SELECT 
+                        SELECT
                             (array_agg(open_price ORDER BY timestamp ASC))[1] as open,
                             MAX(high_price) as high,
                             MIN(low_price) as low,
                             (array_agg(close_price ORDER BY timestamp DESC))[1] as close,
                             SUM(volume) as volume
                         FROM candles
-                        WHERE stock_id = $1 
+                        WHERE stock_id = $1
                         AND timeframe = '1m'
-                        AND timestamp >= $2 
+                        AND timestamp >= $2
                         AND timestamp < $3
                     `, [stock.id, startOfPeriod, endOfPeriod]);
-
                     const candle = candlesRes.rows[0];
                     if (candle && candle.open) {
                         await client.query(`
@@ -171,25 +165,25 @@ export class MarketService {
                     }
                 }
             }
-        } catch (err: any) {
+        }
+        catch (err) {
             // Skip jika table candles belum ada
             if (err.code !== '42P01') {
                 console.error('Error aggregating candles:', err.message);
             }
         }
     }
-
     // Fungsi buat API ambil data grafik dari stock_candles (backward compatible)
-    static async getCandles(symbol: string, timeframe: string = '1m', limit: number = 1000) {
+    static async getCandles(symbol, timeframe = '1m', limit = 1000) {
         try {
             // Coba query dari table candles (multi-timeframe support)
-            const result = await pool.query(`
+            const result = await database_1.default.query(`
                 /* dialect: postgres */
-                SELECT 
+                SELECT
                     extract(epoch from timestamp) * 1000 as time,
-                    open_price as open, 
-                    high_price as high, 
-                    low_price as low, 
+                    open_price as open,
+                    high_price as high,
+                    low_price as low,
                     close_price as close,
                     volume,
                     session_id
@@ -200,19 +194,19 @@ export class MarketService {
                 ORDER BY timestamp ASC
                 LIMIT $3
             `, [symbol, timeframe, limit]);
-
             return result.rows;
-        } catch (err: any) {
+        }
+        catch (err) {
             // Fallback ke stock_candles jika table candles belum ada
             if (err.code === '42P01') { // Table doesn't exist
                 console.warn('⚠️ Table candles tidak ditemukan, fallback ke stock_candles');
-                const result = await pool.query(`
+                const result = await database_1.default.query(`
                     /* dialect: postgres */
-                    SELECT 
+                    SELECT
                         extract(epoch from start_time) * 1000 as time,
-                        open_price as open, 
-                        high_price as high, 
-                        low_price as low, 
+                        open_price as open,
+                        high_price as high,
+                        low_price as low,
                         close_price as close,
                         volume,
                         session_id
@@ -222,18 +216,16 @@ export class MarketService {
                     ORDER BY start_time ASC
                     LIMIT $2
                 `, [symbol, limit]);
-
                 return result.rows;
             }
             throw err;
         }
     }
-
     // Fungsi untuk mengambil daily stock data (OHLC per session)
-    static async getDailyStockData(symbol?: string) {
+    static async getDailyStockData(symbol) {
         let query = `
             /* dialect: postgres */
-            SELECT 
+            SELECT
                 s.symbol,
                 s.name,
                 ts.session_number,
@@ -252,30 +244,24 @@ export class MarketService {
             JOIN stocks s ON d.stock_id = s.id
             JOIN trading_sessions ts ON d.session_id = ts.id
         `;
-
-        const params: any[] = [];
+        const params = [];
         if (symbol) {
             query += ' WHERE s.symbol = $1';
             params.push(symbol);
         }
-
         query += ' ORDER BY ts.session_number DESC, s.symbol ASC LIMIT 100';
-
-        const result = await pool.query(query, params);
+        const result = await database_1.default.query(query, params);
         return result.rows;
     }
-
     // Fungsi untuk mengambil antrean order (Order Queue) pada harga tertentu
-    static async getOrderQueue(symbol: string, price: number) {
+    static async getOrderQueue(symbol, price) {
         const symbolKey = symbol.toUpperCase();
-
         // Cek di antrean BUY dan SELL
         const [buyOrdersRaw, sellOrdersRaw] = await Promise.all([
-            redis.zrangebyscore(`orderbook:${symbolKey}:buy`, price, price),
-            redis.zrangebyscore(`orderbook:${symbolKey}:sell`, price, price)
+            redis_1.default.zrangebyscore(`orderbook:${symbolKey}:buy`, price, price),
+            redis_1.default.zrangebyscore(`orderbook:${symbolKey}:sell`, price, price)
         ]);
-
-        const parseAndSort = (raw: string[], side: 'BUY' | 'SELL') => {
+        const parseAndSort = (raw, side) => {
             const orders = raw.map(str => {
                 try {
                     const data = JSON.parse(str);
@@ -287,19 +273,18 @@ export class MarketService {
                         timestamp: data.timestamp,
                         side: side
                     };
-                } catch (e) {
+                }
+                catch (e) {
                     return null;
                 }
             }).filter(o => o !== null);
-
             // Sort by timestamp ASC (FIFO: First-In First-Out)
             return orders.sort((a, b) => (a?.timestamp || 0) - (b?.timestamp || 0));
         };
-
         const buyQueue = parseAndSort(buyOrdersRaw, 'BUY');
         const sellQueue = parseAndSort(sellOrdersRaw, 'SELL');
-
         // Gabungkan (biasanya hanya satu sisi yang punya harga tersebut, kecuali crossing)
         return [...buyQueue, ...sellQueue];
     }
 }
+exports.MarketService = MarketService;

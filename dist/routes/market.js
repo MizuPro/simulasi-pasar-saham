@@ -1,57 +1,57 @@
+"use strict";
 // routes/market.ts
-
-import { Router, Request, Response } from 'express';
-import { MarketService } from '../services/market-service';
-import redis from '../config/redis';
-
-const router = Router();
-
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const market_service_1 = require("../services/market-service");
+const redis_1 = __importDefault(require("../config/redis"));
+const router = (0, express_1.Router)();
 // Get candles dengan support timeframe (1m, 5m, 15m, 1h, 1d)
-router.get('/candles/:symbol', async (req: Request, res: Response) => {
+router.get('/candles/:symbol', async (req, res) => {
     try {
-        const symbol = req.params.symbol as string;
-        const timeframe = (req.query.timeframe as string) || '1m';
-        const limit = parseInt(req.query.limit as string) || 1000;
-        const data = await MarketService.getCandles(symbol, timeframe, limit);
+        const symbol = req.params.symbol;
+        const timeframe = req.query.timeframe || '1m';
+        const limit = parseInt(req.query.limit) || 1000;
+        const data = await market_service_1.MarketService.getCandles(symbol, timeframe, limit);
         res.json(data);
-    } catch (err) {
+    }
+    catch (err) {
         res.status(500).json({ error: 'Gagal mengambil data candle' });
     }
 });
-
 // Get daily stock data (OHLC per session) - semua saham
-router.get('/daily-data', async (req: Request, res: Response) => {
+router.get('/daily-data', async (req, res) => {
     try {
-        const data = await MarketService.getDailyStockData();
+        const data = await market_service_1.MarketService.getDailyStockData();
         res.json(data);
-    } catch (err) {
+    }
+    catch (err) {
         res.status(500).json({ error: 'Gagal mengambil daily stock data' });
     }
 });
-
 // Get daily stock data (OHLC per session) - per symbol tertentu
-router.get('/daily-data/:symbol', async (req: Request, res: Response) => {
+router.get('/daily-data/:symbol', async (req, res) => {
     try {
-        const symbol = req.params.symbol as string;
-        const data = await MarketService.getDailyStockData(symbol);
+        const symbol = req.params.symbol;
+        const data = await market_service_1.MarketService.getDailyStockData(symbol);
         res.json(data);
-    } catch (err) {
+    }
+    catch (err) {
         res.status(500).json({ error: 'Gagal mengambil daily stock data' });
     }
 });
-
 // GET /api/market/stocks/:symbol/orderbook - Lihat orderbook (bid/ask) untuk saham tertentu
-router.get('/stocks/:symbol/orderbook', async (req: Request, res: Response) => {
+router.get('/stocks/:symbol/orderbook', async (req, res) => {
     try {
-        const symbol = (req.params.symbol as string).toUpperCase();
-        const limit = parseInt(req.query.limit as string) || 10;
-
+        const symbol = req.params.symbol.toUpperCase();
+        const limit = parseInt(req.query.limit) || 10;
         // Ambil dari Redis
-        const buyOrders = await redis.zrevrange(`orderbook:${symbol}:buy`, 0, limit - 1, 'WITHSCORES');
-        const sellOrders = await redis.zrange(`orderbook:${symbol}:sell`, 0, limit - 1, 'WITHSCORES');
-
+        const buyOrders = await redis_1.default.zrevrange(`orderbook:${symbol}:buy`, 0, limit - 1, 'WITHSCORES');
+        const sellOrders = await redis_1.default.zrange(`orderbook:${symbol}:sell`, 0, limit - 1, 'WITHSCORES');
         // Parse hasil Redis
-        const parseOrders = (raw: string[]) => {
+        const parseOrders = (raw) => {
             const result = [];
             for (let i = 0; i < raw.length; i += 2) {
                 const data = JSON.parse(raw[i]);
@@ -63,9 +63,8 @@ router.get('/stocks/:symbol/orderbook', async (req: Request, res: Response) => {
             }
             return result;
         };
-
         // Aggregate by price level
-        const aggregateByPrice = (orders: any[]) => {
+        const aggregateByPrice = (orders) => {
             const priceMap = new Map();
             for (const order of orders) {
                 const existing = priceMap.get(order.price) || { price: order.price, totalQty: 0, count: 0 };
@@ -75,41 +74,36 @@ router.get('/stocks/:symbol/orderbook', async (req: Request, res: Response) => {
             }
             return Array.from(priceMap.values());
         };
-
         const bids = aggregateByPrice(parseOrders(buyOrders));
         const asks = aggregateByPrice(parseOrders(sellOrders));
-
         res.json({
             symbol,
             bids, // Buy orders (harga tinggi ke rendah)
-            asks  // Sell orders (harga rendah ke tinggi)
+            asks // Sell orders (harga rendah ke tinggi)
         });
-    } catch (err) {
+    }
+    catch (err) {
         res.status(500).json({ error: 'Gagal mengambil orderbook' });
     }
 });
-
 // GET /api/market/queue/:symbol - Lihat detail antrean order pada harga tertentu
-router.get('/queue/:symbol', async (req: Request, res: Response) => {
+router.get('/queue/:symbol', async (req, res) => {
     try {
-        const symbol = req.params.symbol as string;
-        const price = parseFloat(req.query.price as string);
-
+        const symbol = req.params.symbol;
+        const price = parseFloat(req.query.price);
         if (isNaN(price)) {
             res.status(400).json({ error: 'Parameter price wajib diisi dan harus berupa angka' });
             return;
         }
-
-        const queue = await MarketService.getOrderQueue(symbol, price);
-
+        const queue = await market_service_1.MarketService.getOrderQueue(symbol, price);
         res.json({
             symbol: symbol.toUpperCase(),
             price,
             queue // List order urut berdasarkan timestamp (FIFO)
         });
-    } catch (err) {
+    }
+    catch (err) {
         res.status(500).json({ error: 'Gagal mengambil antrean order' });
     }
 });
-
-export default router;
+exports.default = router;
