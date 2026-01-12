@@ -117,7 +117,8 @@ RETURNING id
                     price,
                     quantity,
                     timestamp,
-                    remaining_quantity: quantity
+                    remaining_quantity: quantity,
+                    avg_price_at_order: avgPriceAtOrder ? parseFloat(avgPriceAtOrder) : undefined
                 });
 
                 const redisKey = `orderbook:${symbol}:${type.toLowerCase()}`;

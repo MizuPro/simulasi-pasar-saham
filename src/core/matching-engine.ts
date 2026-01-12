@@ -22,6 +22,7 @@ interface OrderData {
     quantity: number;
     timestamp: number;
     remaining_quantity: number;
+    avg_price_at_order?: number; // Added avg_price_at_order
 }
 
 interface ParsedOrder {
@@ -820,4 +821,3 @@ export class MatchingEngine {
     }
 
 }
-
