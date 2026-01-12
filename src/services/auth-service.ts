@@ -45,10 +45,18 @@ export class AuthService {
     }
 
     // Fungsi untuk mendapatkan semua users (untuk admin)
-    static async getAllUsers(): Promise<IUser[]> {
-        const result = await pool.query(
-            'SELECT id, username, full_name, balance_rdn, role, created_at FROM users ORDER BY created_at DESC'
-        );
+    static async getAllUsers(role?: string): Promise<IUser[]> {
+        let query = 'SELECT id, username, full_name, balance_rdn, role, created_at FROM users';
+        const params: any[] = [];
+
+        if (role) {
+            query += ' WHERE role = $1';
+            params.push(role);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const result = await pool.query(query, params);
         return result.rows;
     }
 

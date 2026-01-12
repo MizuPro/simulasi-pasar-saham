@@ -42,7 +42,7 @@ router.delete('/:id', auth, async (req: AuthRequest, res: Response) => {
 
     try {
 
-        const result = await OrderService.cancelOrder(req.userId!, req.params.id);
+        const result = await OrderService.cancelOrder(req.userId!, req.params.id as string);
 
         res.json(result);
 
