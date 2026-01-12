@@ -1,7 +1,7 @@
 # 📚 M-BIT Trading Platform - API Documentation
 
 > **Base URL**: `http://localhost:3000/api`
-> **Version**: 1.3.0
+> **Version**: 1.3.1
 > **Last Updated**: January 10, 2026
 
 ---
@@ -180,13 +180,15 @@ GET /market/candles/MICH?timeframe=5m&limit=100
     "high": 1250.00,
     "low": 1180.00,
     "close": 1230.00,
-    "volume": 5000
+    "volume": 5000,
+    "session_id": 5
   }
 ]
 ```
 
 **Notes:**
 - `time` is in milliseconds (JavaScript timestamp)
+- `session_id`: ID of the trading session when the candle was generated (null if not available)
 - Data sorted ascending by time
 
 ---
@@ -1734,6 +1736,7 @@ CREATE TABLE candles (
     close_price NUMERIC(15, 2) NOT NULL,
     volume      INTEGER NOT NULL DEFAULT 0,
     timestamp   TIMESTAMP NOT NULL,
+    session_id  INTEGER REFERENCES trading_sessions(id) ON DELETE SET NULL,
     created_at  TIMESTAMP DEFAULT now(),
     UNIQUE (stock_id, timeframe, timestamp)
 );

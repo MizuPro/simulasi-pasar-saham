@@ -12,6 +12,10 @@ export class MarketService {
             // 1. Ambil semua saham aktif
             const stocks = await client.query('SELECT id, symbol FROM stocks WHERE is_active = true');
 
+            // 1b. Ambil session aktif saat ini
+            const sessionRes = await client.query("SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1");
+            const currentSessionId = sessionRes.rowCount > 0 ? sessionRes.rows[0].id : null;
+
             for (const stock of stocks.rows) {
                 try {
                     // 2. Ambil trades dalam 1 menit terakhir (Misal sekarang 10:05, ambil data 10:04:00 - 10:04:59)
@@ -68,31 +72,34 @@ export class MarketService {
                     }
 
                     // 3. Simpan ke stock_candles (untuk 1-minute raw data)
+                    // REVISI: Tambahkan session_id
                     await client.query(`
                         /* dialect: postgres */
-                        INSERT INTO stock_candles (stock_id, resolution, open_price, high_price, low_price, close_price, volume, start_time)
-                        VALUES ($1, '1M', $2, $3, $4, $5, $6, $7)
-                    `, [stock.id, open, high, low, close, volume, startTime]);
+                        INSERT INTO stock_candles (stock_id, resolution, open_price, high_price, low_price, close_price, volume, start_time, session_id)
+                        VALUES ($1, '1M', $2, $3, $4, $5, $6, $7, $8)
+                    `, [stock.id, open, high, low, close, volume, startTime, currentSessionId]);
 
                     // 4. Juga simpan ke candles table untuk multi-timeframe support (jika table ada)
                     try {
+                        // REVISI: Tambahkan session_id
                         await client.query(`
                             /* dialect: postgres */
-                            INSERT INTO candles (stock_id, timeframe, open_price, high_price, low_price, close_price, volume, timestamp)
-                            VALUES ($1, '1m', $2, $3, $4, $5, $6, $7)
+                            INSERT INTO candles (stock_id, timeframe, open_price, high_price, low_price, close_price, volume, timestamp, session_id)
+                            VALUES ($1, '1m', $2, $3, $4, $5, $6, $7, $8)
                             ON CONFLICT (stock_id, timeframe, timestamp) DO UPDATE
                             SET open_price = EXCLUDED.open_price,
                                 high_price = EXCLUDED.high_price,
                                 low_price = EXCLUDED.low_price,
                                 close_price = EXCLUDED.close_price,
-                                volume = EXCLUDED.volume
-                        `, [stock.id, open, high, low, close, volume, startTime]);
+                                volume = EXCLUDED.volume,
+                                session_id = EXCLUDED.session_id
+                        `, [stock.id, open, high, low, close, volume, startTime, currentSessionId]);
                     } catch (err: any) {
                         // Skip jika table candles belum ada
                         if (err.code !== '42P01') throw err;
                     }
 
-                    console.log(`🕯️ Candle generated for ${stock.symbol}: O:${open} H:${high} L:${low} C:${close} V:${volume}`);
+                    console.log(`🕯️ Candle generated for ${stock.symbol}: O:${open} H:${high} L:${low} C:${close} V:${volume} (Session: ${currentSessionId})`);
                 } catch (stockErr) {
                     console.error(`❌ Error processing stock ${stock.symbol}:`, stockErr);
                     // Continue to next stock
@@ -100,7 +107,7 @@ export class MarketService {
             }
 
             // 5. Generate candles untuk timeframe lain (5m, 15m, 1h, 1d)
-            await this.aggregateCandles(client);
+            await this.aggregateCandles(client, currentSessionId);
         } catch (err) {
             console.error('❌ Error generating candles:', err);
         } finally {
@@ -110,7 +117,7 @@ export class MarketService {
     }
 
     // Aggregate candles dari 1m ke timeframe yang lebih besar
-    private static async aggregateCandles(client: any) {
+    private static async aggregateCandles(client: any, sessionId: number | null) {
         try {
             const timeframes = [
                 { name: '5m', minutes: 5 },
@@ -150,15 +157,16 @@ export class MarketService {
                     if (candle && candle.open) {
                         await client.query(`
                             /* dialect: postgres */
-                            INSERT INTO candles (stock_id, timeframe, open_price, high_price, low_price, close_price, volume, timestamp)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            INSERT INTO candles (stock_id, timeframe, open_price, high_price, low_price, close_price, volume, timestamp, session_id)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                             ON CONFLICT (stock_id, timeframe, timestamp) DO UPDATE
                             SET open_price = EXCLUDED.open_price,
                                 high_price = EXCLUDED.high_price,
                                 low_price = EXCLUDED.low_price,
                                 close_price = EXCLUDED.close_price,
-                                volume = EXCLUDED.volume
-                        `, [stock.id, tf.name, candle.open, candle.high, candle.low, candle.close, candle.volume || 0, startOfPeriod]);
+                                volume = EXCLUDED.volume,
+                                session_id = EXCLUDED.session_id
+                        `, [stock.id, tf.name, candle.open, candle.high, candle.low, candle.close, candle.volume || 0, startOfPeriod, sessionId]);
                     }
                 }
             }
@@ -182,7 +190,8 @@ export class MarketService {
                     high_price as high, 
                     low_price as low, 
                     close_price as close,
-                    volume
+                    volume,
+                    session_id
                 FROM candles c
                 JOIN stocks s ON c.stock_id = s.id
                 WHERE s.symbol = $1
@@ -204,7 +213,8 @@ export class MarketService {
                         high_price as high, 
                         low_price as low, 
                         close_price as close,
-                        volume
+                        volume,
+                        session_id
                     FROM stock_candles sc
                     JOIN stocks s ON sc.stock_id = s.id
                     WHERE s.symbol = $1
