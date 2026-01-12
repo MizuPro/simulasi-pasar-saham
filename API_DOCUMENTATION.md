@@ -419,6 +419,9 @@ GET /market/queue/MICH?price=1250
 - `CANCELED`: Order canceled by user or system
 - `REJECTED`: Order rejected (validation failed)
 
+**New Field:**
+- `profit_loss` (Numeric): Only available for `SELL` orders. Shows the realized Profit/Loss based on the difference between `execution_price` and the `average_buy_price` at the time of the order. `(Execution Price - Avg Buy Price) * Matched Quantity * 100`.
+
 ---
 
 ### Get Active Orders
@@ -790,7 +793,8 @@ DELETE /portfolio/watchlist/MICH
     "full_name": "System Administrator",
     "balance_rdn": 0,
     "role": "ADMIN",
-    "created_at": "2026-01-01T00:00:00Z"
+    "created_at": "2026-01-01T00:00:00Z",
+    "equity": 0
   },
   {
     "id": "uuid-2",
@@ -798,9 +802,13 @@ DELETE /portfolio/watchlist/MICH
     "full_name": "John Doe",
     "balance_rdn": 0,
     "role": "USER",
-    "created_at": "2026-01-07T10:00:00Z"
+    "created_at": "2026-01-07T10:00:00Z",
+    "equity": 15000000
   }
 ]
+
+**New Field:**
+- `equity`: Total value of user assets (`balance_rdn + stock_value`). Stock value is calculated using the last available closing price.
 ```
 
 ---
