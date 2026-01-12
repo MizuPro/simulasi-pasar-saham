@@ -13,16 +13,19 @@ export class OrderService {
             await client.query('BEGIN');
 
             // 1. Ambil data saham & harga ARA/ARB sesi ini
+            // REVISI: Cek status sesi sebenarnya untuk validasi PRE_OPEN/LOCKED/OPEN
             let stockRes = await client.query(`
 /* dialect: postgres */
-SELECT s.id, d.ara_limit, d.arb_limit, d.session_id, 'OPEN' as session_status
+SELECT s.id, d.ara_limit, d.arb_limit, d.session_id, ts.status as session_status
 FROM stocks s
 JOIN daily_stock_data d ON s.id = d.stock_id
-WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
+JOIN trading_sessions ts ON d.session_id = ts.id
+WHERE s.symbol = $1 AND ts.status IN ('OPEN', 'PRE_OPEN', 'LOCKED')
+ORDER BY ts.id DESC LIMIT 1
 `, [symbol]);
 
-            // Jika pasar TUTUP, ambil data dari sesi TERAKHIR yang sudah close
-            let isMarketOpen = true;
+            // Jika pasar TUTUP (tidak ada status OPEN/PRE_OPEN/LOCKED), ambil data dari sesi TERAKHIR
+            let sessionStatus = 'CLOSED';
             if ((stockRes.rowCount ?? 0) === 0) {
                 stockRes = await client.query(`
                     /* dialect: postgres */
@@ -34,10 +37,16 @@ WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE st
                 `, [symbol]);
 
                 if ((stockRes.rowCount ?? 0) === 0) throw new Error('Saham tidak ditemukan');
-                isMarketOpen = false;
+            } else {
+                sessionStatus = stockRes.rows[0].session_status;
             }
 
             const stock = stockRes.rows[0];
+
+            // VALIDASI FASE MARKET
+            if (sessionStatus === 'LOCKED') {
+                throw new Error('Market sedang Locked (IEP Calculation). Tidak bisa pasang order.');
+            }
 
             // 2. Validasi Harga (Tick Size & ARA/ARB)
             if (!isValidTickSize(price)) throw new Error('Harga tidak sesuai fraksi (Tick Size)');
@@ -107,8 +116,9 @@ RETURNING id
 
             await client.query('COMMIT');
 
-            // 5. Jika Market OPEN: Lempar ke Redis buat diolah Matching Engine
-            if (isMarketOpen) {
+            // 5. Jika Market OPEN/PRE_OPEN: Lempar ke Redis buat diolah Matching Engine / IEP Engine
+            // Jika PRE_OPEN, Matching Engine tidak akan match tapi akan update IEP.
+            if (sessionStatus === 'OPEN' || sessionStatus === 'PRE_OPEN') {
                 const timestamp = Date.now();
                 const redisPayload = JSON.stringify({
                     orderId,
@@ -124,7 +134,7 @@ RETURNING id
                 const redisKey = `orderbook:${symbol}:${type.toLowerCase()}`;
                 await redis.zadd(redisKey, price, redisPayload);
 
-                console.log(`📝 Order placed: ${type} ${symbol} @ ${price} x ${quantity} lots (ID: ${orderId})`);
+                console.log(`📝 Order placed: ${type} ${symbol} @ ${price} x ${quantity} lots (ID: ${orderId}) [${sessionStatus}]`);
 
                 // Panggil Engine tanpa await (Background Process)
                 MatchingEngine.match(symbol);

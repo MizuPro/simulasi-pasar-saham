@@ -1,0 +1,483 @@
+
+> mbit_platform@1.0.0 start
+> node dist/index.js
+
+[dotenv@17.2.3] injecting env (8) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+✅ Matching Engine initialized with circuit breaker and monitoring
+⏰ Market Data Scheduler Started (every 1 minute)
+🚀 Server Backend Running at http://localhost:3000
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 1, waiting 50ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 50ms
+✅ PostgreSQL pool warmed up: 0/10 connections ready
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 2, waiting 100ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 100ms
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 3, waiting 150ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 150ms
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 4, waiting 200ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 200ms
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 5, waiting 250ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 250ms
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 6, waiting 300ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 300ms
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 7, waiting 350ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 350ms
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 8, waiting 400ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 400ms
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 9, waiting 450ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 450ms
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Redis retry attempt 10, waiting 500ms
+⚠️ Redis connection closed
+🔄 Redis reconnecting in 500ms
+❌ Redis error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis connection failed after 10 retries
+⚠️ Redis connection closed
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Cron job error: AggregateError [ECONNREFUSED]:
+    at /app/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async MarketService.generateOneMinuteCandles (/app/dist/services/market-service.js:11:24)
+    at async /app/dist/index.js:112:9
+    at async Timeout._onTimeout (/app/node_modules/node-cron/dist/cjs/scheduler/runner.js:70:44) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5433
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5433
+    }
+  ]
+}
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Cron job error: AggregateError [ECONNREFUSED]:
+    at /app/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async MarketService.generateOneMinuteCandles (/app/dist/services/market-service.js:11:24)
+    at async /app/dist/index.js:112:9
+    at async Timeout._onTimeout (/app/node_modules/node-cron/dist/cjs/scheduler/runner.js:70:44) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5433
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5433
+    }
+  ]
+}
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Cron job error: AggregateError [ECONNREFUSED]:
+    at /app/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async MarketService.generateOneMinuteCandles (/app/dist/services/market-service.js:11:24)
+    at async /app/dist/index.js:112:9
+    at async Timeout._onTimeout (/app/node_modules/node-cron/dist/cjs/scheduler/runner.js:70:44) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5433
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5433
+    }
+  ]
+}
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Cron job error: AggregateError [ECONNREFUSED]:
+    at /app/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async MarketService.generateOneMinuteCandles (/app/dist/services/market-service.js:11:24)
+    at async /app/dist/index.js:112:9
+    at async Timeout._onTimeout (/app/node_modules/node-cron/dist/cjs/scheduler/runner.js:70:44) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5433
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5433
+    }
+  ]
+}
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+[2026-01-12T09:45:22.132Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:32:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.168Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:33:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.182Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:34:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.195Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:35:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.209Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:36:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.241Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:37:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.255Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:38:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.269Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:39:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.283Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:40:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.297Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:41:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.315Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:42:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.327Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:43:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.337Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:44:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[2026-01-12T09:45:22.349Z] [PID: 4786] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 09:45:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Cron job error: AggregateError [ECONNREFUSED]:
+    at /app/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async MarketService.generateOneMinuteCandles (/app/dist/services/market-service.js:11:24)
+    at async /app/dist/index.js:112:9
+    at async Timeout._onTimeout (/app/node_modules/node-cron/dist/cjs/scheduler/runner.js:70:44) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5433
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5433
+    }
+  ]
+}
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+⚠️ Cron job error: AggregateError [ECONNREFUSED]:
+    at /app/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async MarketService.generateOneMinuteCandles (/app/dist/services/market-service.js:11:24)
+    at async /app/dist/index.js:112:9
+    at async Timeout._onTimeout (/app/node_modules/node-cron/dist/cjs/scheduler/runner.js:70:44) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5433
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5433
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5433
+    }
+  ]
+}
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+📊 DB Pool: Total=0, Active=0, Idle=0, Waiting=0 (NaN% utilized)
+📈 Matching Engine Stats: Trades=0 (0.00 TPS), Matches=0, Errors=0, CircuitBroken=0, LockTimeouts=0
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379
+❌ Redis Lock error: connect ECONNREFUSED 127.0.0.1:6379

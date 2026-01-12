@@ -301,6 +301,36 @@ GET /market/queue/MICH?price=1250
 
 ---
 
+### Get Indicative Equilibrium Price (IEP)
+**GET** `/market/iep/:symbol`
+
+> 📝 **Note**: Mengambil data IEP saat fase **PRE-OPEN** atau **LOCKED**. Di luar fase itu, nilainya `null`.
+
+**Response (200) - During Pre-Open/Locked:**
+```json
+{
+  "symbol": "MICH",
+  "iep": 1250.00,
+  "volume": 5000,
+  "surplus": 100,
+  "status": "PRE_OPEN"
+}
+```
+*Note: `status` can be `PRE_OPEN` or `LOCKED`.*
+
+**Response (200) - During Open/Closed:**
+```json
+{
+  "symbol": "MICH",
+  "iep": null,
+  "volume": 0,
+  "surplus": 0,
+  "status": "OPEN"
+}
+```
+
+---
+
 ### Get Orderbook (Admin Endpoint - Legacy)
 **GET** `/admin/orderbook/:symbol`
 
@@ -362,6 +392,7 @@ GET /market/queue/MICH?price=1250
 - Price must comply with tick size rules
 - BUY: Sufficient RDN balance required
 - SELL: Sufficient stock ownership required
+- **Phase Restriction**: Cannot place orders during `LOCKED` phase. Allowed in `PRE_OPEN` (queued) and `OPEN`.
 
 ---
 
@@ -380,11 +411,12 @@ GET /market/queue/MICH?price=1250
 - Refunds RDN for BUY orders
 - For SELL orders, the stocks were never deducted from the portfolio (only locked in the orderbook), so cancellation simply releases the lock without needing a refund update to the portfolio table.
 - Only cancels PENDING or PARTIAL orders
+- Allowed in all active phases (`PRE_OPEN`, `LOCKED`, `OPEN`).
 
 ---
 
 ### Get Order History
-**GET** `/orders/history`  
+**GET** `/orders/history`
 🔒 **Requires Authentication**
 
 **Response (200):**
@@ -427,7 +459,7 @@ GET /market/queue/MICH?price=1250
 ---
 
 ### Get Active Orders
-**GET** `/orders/active`  
+**GET** `/orders/active`
 🔒 **Requires Authentication**
 
 **Response (200):**
@@ -455,7 +487,7 @@ GET /market/queue/MICH?price=1250
 ## 💰 Portfolio
 
 ### Get Portfolio
-**GET** `/portfolio`  
+**GET** `/portfolio`
 🔒 **Requires Authentication**
 
 **Response (200):**
@@ -480,7 +512,7 @@ GET /market/queue/MICH?price=1250
 ## 👁️ Watchlist
 
 ### Get Watchlist
-**GET** `/portfolio/watchlist`  
+**GET** `/portfolio/watchlist`
 🔒 **Requires Authentication**
 
 **Response (200):**
@@ -506,7 +538,7 @@ GET /market/queue/MICH?price=1250
 ---
 
 ### Add to Watchlist
-**POST** `/portfolio/watchlist`  
+**POST** `/portfolio/watchlist`
 🔒 **Requires Authentication**
 
 **Request Body:**
@@ -537,7 +569,7 @@ GET /market/queue/MICH?price=1250
 ---
 
 ### Remove from Watchlist
-**DELETE** `/portfolio/watchlist/:symbol`  
+**DELETE** `/portfolio/watchlist/:symbol`
 🔒 **Requires Authentication**
 
 **Example:**
@@ -567,7 +599,7 @@ DELETE /portfolio/watchlist/MICH
 ```json
 {
   "id": 5,
-  "status": "OPEN",
+  "status": "PRE_OPEN",
   "session_number": 5,
   "started_at": "2026-01-07T09:00:00Z",
   "ended_at": null
@@ -575,6 +607,8 @@ DELETE /portfolio/watchlist/MICH
 ```
 
 **Status Values:**
+- `PRE_OPEN`: Pre-opening phase (IEP calculation active).
+- `LOCKED`: Locked phase (No new orders, IEP finalized).
 - `OPEN`: Trading session active
 - `CLOSED`: Trading session closed
 
@@ -587,19 +621,29 @@ DELETE /portfolio/watchlist/MICH
 **Response (200):**
 ```json
 {
-  "message": "Sesi trading berhasil dibuka",
+  "message": "Sesi trading berhasil dibuka (Pre-Opening)",
   "session": {
     "id": 6,
     "session_number": 6,
-    "status": "OPEN",
+    "status": "PRE_OPEN",
     "started_at": "2026-01-07T09:00:00Z"
+  },
+  "timeline": {
+    "preOpen": 15000,
+    "locked": 5000,
+    "totalPreOpen": 20000
   }
 }
 ```
 
 **Notes:**
+- Initiates the **Pre-Opening** sequence:
+  1.  **PRE-OPEN** (15s default): Users can input orders, IEP changes in real-time.
+  2.  **LOCKED** (5s default): Order input blocked, IEP static.
+  3.  **OPEN**: Call Auction execution (IEP Match) -> Continuous Trading.
 - Automatically calculates ARA/ARB limits for all active stocks
 - Uses last candle close price or default 1000
+- Automatically injects pending orders from offline/closed state.
 - Cannot open if session already OPEN
 
 ---
@@ -625,7 +669,7 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Calculate ARA/ARB Limits
-**POST** `/admin/init-session`  
+**POST** `/admin/init-session`
 🔒 **Requires Admin Authentication**
 
 **Request Body:**
@@ -652,7 +696,7 @@ DELETE /portfolio/watchlist/MICH
 ## 🏗️ Stock Management (Admin Only)
 
 ### Create New Stock
-**POST** `/admin/stocks`  
+**POST** `/admin/stocks`
 🔒 **Requires Admin Authentication**
 
 **Request Body:**
@@ -682,7 +726,7 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Update Stock Data
-**PUT** `/admin/stocks/:id`  
+**PUT** `/admin/stocks/:id`
 🔒 **Requires Admin Authentication**
 
 **Request Body (Partial update supported):**
@@ -712,7 +756,7 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Issue Shares to User
-**POST** `/admin/stocks/:id/issue`  
+**POST** `/admin/stocks/:id/issue`
 🔒 **Requires Admin Authentication**
 
 > 📝 **Note**: This endpoint allows admin to issue shares (IPO/Private Placement) to a specific user. It checks against `max_shares` to prevent over-issuance.
@@ -750,7 +794,7 @@ DELETE /portfolio/watchlist/MICH
 > ⚠️ **All endpoints in this section require ADMIN role**
 
 ### Create Admin User
-**POST** `/auth/admin/create`  
+**POST** `/auth/admin/create`
 🔒 **Requires Admin Authentication**
 
 **Request Body:**
@@ -783,7 +827,7 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Get All Users
-**GET** `/auth/admin/users`  
+**GET** `/auth/admin/users`
 🔒 **Requires Admin Authentication**
 
 **Response (200):**
@@ -816,7 +860,7 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Update User Role
-**PUT** `/auth/admin/role`  
+**PUT** `/auth/admin/role`
 🔒 **Requires Admin Authentication**
 
 **Request Body:**
@@ -913,7 +957,7 @@ DELETE /portfolio/watchlist/MICH
 ## 🤖 Bot Management (Admin Only)
 
 > ⚠️ **All endpoints in this section require ADMIN role**
-> 
+>
 > **Purpose**: Bot Management API memungkinkan admin untuk mengisi orderbook dengan synthetic orders (bot orders) untuk menciptakan likuiditas pasar awal. Bot orders tidak terkait dengan akun user real dan tidak memengaruhi database users/portfolios.
 
 ### Key Features:
@@ -936,7 +980,7 @@ DELETE /portfolio/watchlist/MICH
 ---
 
 ### Populate Orderbook for Single Stock
-**POST** `/admin/bot/populate`  
+**POST** `/admin/bot/populate`
 🔒 **Requires Admin Authentication**
 
 > 📝 **Note**: Mengisi orderbook dengan bot orders untuk satu saham tertentu.
@@ -995,7 +1039,7 @@ curl -X POST http://localhost:3000/api/admin/bot/populate \
 ---
 
 ### Populate Orderbook for All Active Stocks
-**POST** `/admin/bot/populate-all`  
+**POST** `/admin/bot/populate-all`
 🔒 **Requires Admin Authentication**
 
 > 📝 **Note**: Mengisi orderbook untuk semua saham aktif sekaligus.
@@ -1020,7 +1064,7 @@ curl -X POST http://localhost:3000/api/admin/bot/populate \
 ---
 
 ### Clear Bot Orders
-**DELETE** `/admin/bot/clear`  
+**DELETE** `/admin/bot/clear`
 🔒 **Requires Admin Authentication**
 
 > 📝 **Note**: Menghapus semua bot orders. Aksi ini juga akan men-trigger update realtime ke client untuk membersihkan tampilan orderbook.
@@ -1038,7 +1082,7 @@ curl -X DELETE "http://localhost:3000/api/admin/bot/clear?symbol=MICH" \
 ---
 
 ### Get Orderbook Statistics
-**GET** `/admin/bot/stats/:symbol`  
+**GET** `/admin/bot/stats/:symbol`
 🔒 **Requires Admin Authentication**
 
 > 📝 **Note**: Melihat statistik perbandingan bot vs user orders.
@@ -1065,7 +1109,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 
 **Recommended workflow untuk memulai session baru:**
 
-1. **Open Session**: 
+1. **Open Session**:
    ```bash
    POST /api/admin/session/open
    ```
@@ -1143,7 +1187,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ## 🧾 Order & Trade Management (Admin Only)
 
 ### List All Orders
-**GET** `/admin/orders`  
+**GET** `/admin/orders`
 🔒 **Requires Admin Authentication**
 
 **Query Parameters:**
@@ -1173,7 +1217,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ---
 
 ### List All Trades
-**GET** `/admin/trades`  
+**GET** `/admin/trades`
 🔒 **Requires Admin Authentication**
 
 **Query Parameters:**
@@ -1214,7 +1258,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ---
 
 ### Get Matching Engine Statistics
-**GET** `/admin/engine/stats`  
+**GET** `/admin/engine/stats`
 🔒 **Requires Admin Authentication**
 
 **Response (200):**
@@ -1236,7 +1280,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ---
 
 ### System Health Check
-**GET** `/admin/health`  
+**GET** `/admin/health`
 🔒 **Requires Admin Authentication**
 
 **Response (200):**
@@ -1261,7 +1305,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ---
 
 ### Validate Orderbook Integrity
-**GET** `/admin/orderbook/validate?symbol=MICH`  
+**GET** `/admin/orderbook/validate?symbol=MICH`
 🔒 **Requires Admin Authentication**
 
 **Response (200):**
@@ -1284,7 +1328,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ---
 
 ### Reset Circuit Breaker
-**POST** `/admin/engine/reset-circuit`  
+**POST** `/admin/engine/reset-circuit`
 🔒 **Requires Admin Authentication**
 
 **Request Body:**
@@ -1305,7 +1349,7 @@ curl -X GET http://localhost:3000/api/admin/bot/stats/MICH \
 ---
 
 ### Force Broadcast Orderbook Update
-**POST** `/admin/engine/force-broadcast`  
+**POST** `/admin/engine/force-broadcast`
 🔒 **Requires Admin Authentication**
 
 **Request Body:**
@@ -1336,6 +1380,20 @@ const socket = io('http://localhost:3000');
 **Emit:** `join_stock`
 ```javascript
 socket.emit('join_stock', 'MICH');
+```
+
+**Listen:** `iep_update` (New!)
+```javascript
+socket.on('iep_update', (data) => {
+  console.log(data);
+  // {
+  //   symbol: 'MICH',
+  //   iep: 1250,      // or null
+  //   volume: 5000,   // matched volume
+  //   surplus: 100,
+  //   status: 'PRE_OPEN' // or LOCKED, OPEN
+  // }
+});
 ```
 
 **Listen:** `price_update`
@@ -1494,6 +1552,13 @@ ARB: 1,200 - (1,200 × 0.25) = 900
 ---
 
 ## ⚙️ Matching Engine Logic
+
+### Market Phases & IEP
+The system now supports **Pre-Opening** mechanism similar to IDX:
+1.  **Pre-Open Phase**: Orders are collected but not matched. IEP is calculated based on intersecting supply/demand curves to maximize volume.
+2.  **Locked Phase**: No new orders allowed.
+3.  **Call Auction (Open)**: All eligible orders are matched at a single IEP price.
+4.  **Continuous Trading**: Normal Price-Time Priority matching.
 
 ### Price-Time Priority (FIFO)
 The matching engine follows the **FIFO (First In, First Out)** principle:

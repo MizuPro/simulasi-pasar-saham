@@ -3,6 +3,8 @@
 import { Server } from 'socket.io';
 import pool from '../config/database';
 import redis from '../config/redis';
+import { IEPEngine } from './iep-engine';
+import { SessionStatus } from '../config/market';
 
 // Circuit Breaker States
 type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
@@ -64,6 +66,8 @@ export class MatchingEngine {
     private static readonly BROADCAST_THROTTLE_MS = 500; // 500ms throttle for better responsiveness
     private static readonly DEBUG = false; // Set to true for detailed matching logs
 
+    private static currentSessionStatus: SessionStatus = SessionStatus.CLOSED;
+
     static initialize(ioInstance: Server) {
         this.io = ioInstance;
 
@@ -93,6 +97,11 @@ export class MatchingEngine {
         setInterval(() => this.cleanupStaleOrders(), 60000);
 
         console.log('✅ Matching Engine initialized with circuit breaker and monitoring');
+    }
+
+    static setSessionStatus(status: SessionStatus) {
+        this.currentSessionStatus = status;
+        console.log(`ℹ️ MatchingEngine Session Status updated to: ${status}`);
     }
 
     /**
@@ -210,7 +219,18 @@ export class MatchingEngine {
         }, this.LOCK_TIMEOUT_MS);
 
         try {
-            await this.processMatching(symbol);
+            // Check Session Status
+            if (this.currentSessionStatus === SessionStatus.PRE_OPEN || this.currentSessionStatus === SessionStatus.LOCKED) {
+                // IEP Phase: Calculate & Broadcast only
+                await this.processIEPCalculation(symbol);
+            } else if (this.currentSessionStatus === SessionStatus.OPEN) {
+                // Continuous Trading Phase
+                await this.processMatching(symbol);
+            } else {
+                // Closed/Break
+                if (this.DEBUG) console.log(`⏸️ [${symbol}] Market is ${this.currentSessionStatus}, skipping match.`);
+            }
+
             this.recordSuccess(symbol);
         } catch (error: any) {
             this.stats.errors++;
@@ -225,6 +245,135 @@ export class MatchingEngine {
                 queueState.pending = 0;
                 setImmediate(() => this.match(symbol));
             }
+        }
+    }
+
+    /**
+     * IEP Calculation and Broadcast (No Execution)
+     */
+    private static async processIEPCalculation(symbol: string) {
+        const iepData = await IEPEngine.calculateIEP(symbol);
+
+        if (this.io) {
+            // Broadcast Orderbook (still needed for user visibility)
+            await this.throttledBroadcast(symbol);
+
+            // Broadcast IEP
+            // User requirement: "nilai ini hanya ada isinya ketika 5 detik locked IEP, sisanya null"
+            // Wait, point 1: "15 detik Pre-Opening fase yang secara realtime berubah, dan 5 detik terakhir locked. Jadi totalnya 20 detik, diluar 20 detik itu isi nilainya dengan null."
+            // So during PRE_OPEN and LOCKED, we broadcast the value.
+
+            // However, strictly speaking, during LOCKED, the value shouldn't change because no new orders.
+            // But we should still broadcast it.
+
+            // The requirement allows showing it in PRE_OPEN too ("realtime berubah").
+
+            const payload = iepData ? {
+                symbol,
+                iep: iepData.price,
+                volume: iepData.matchedVolume,
+                surplus: iepData.surplus,
+                status: this.currentSessionStatus
+            } : {
+                symbol,
+                iep: null,
+                volume: 0,
+                surplus: 0,
+                status: this.currentSessionStatus
+            };
+
+            this.io.to(symbol).emit('iep_update', payload);
+            if (this.DEBUG) console.log(`📊 [${symbol}] IEP Update:`, payload);
+        }
+    }
+
+    /**
+     * Execute IEP Match (Call Auction)
+     * Called when transitioning LOCKED -> OPEN
+     */
+    static async executeIEP(symbol: string) {
+        if (this.DEBUG) console.log(`🚀 [${symbol}] Executing IEP...`);
+
+        // Ensure status is OPEN so we can execute
+        // Actually this method is called exactly at the transition.
+
+        const iepResult = await IEPEngine.calculateIEP(symbol);
+        if (!iepResult || iepResult.matchedVolume === 0) {
+            console.log(`ℹ️ [${symbol}] No IEP match possible.`);
+
+            // Clear IEP display
+            if (this.io) {
+                this.io.to(symbol).emit('iep_update', { symbol, iep: null, status: SessionStatus.OPEN });
+            }
+            return;
+        }
+
+        const matchPrice = iepResult.price;
+        console.log(`💎 [${symbol}] IEP Executing at ${matchPrice} with volume ${iepResult.matchedVolume}`);
+
+        // Fetch all potential orders from Redis
+        const [buyQueueRaw, sellQueueRaw] = await Promise.all([
+            redis.zrevrange(`orderbook:${symbol}:buy`, 0, -1, 'WITHSCORES'),
+            redis.zrange(`orderbook:${symbol}:sell`, 0, -1, 'WITHSCORES')
+        ]);
+
+        const buys = this.parseOrderQueue(buyQueueRaw, symbol, 'buy');
+        const sells = this.parseOrderQueue(sellQueueRaw, symbol, 'sell');
+
+        // Filter executable orders
+        const executableBuys = buys.filter(b => b.price >= matchPrice);
+        const executableSells = sells.filter(s => s.price <= matchPrice);
+
+        // Sort by Priority (Price-Time)
+        // Buy: Higher Price = Higher Priority (already sorted by Redis score usually, but check)
+        // Redis zrevrange returns highest score first. So buys are sorted by Price Desc.
+        // For same price, we need Time Asc. Redis handles score, but for same score, it uses Lexicographical order of member.
+        // Our member is JSON string. This is NOT reliable for Time priority.
+        // We MUST sort manually by Price (Best) then Timestamp (Oldest).
+
+        executableBuys.sort((a, b) => b.price !== a.price ? b.price - a.price : a.data.timestamp - b.data.timestamp);
+        executableSells.sort((a, b) => a.price !== b.price ? a.price - b.price : a.data.timestamp - b.data.timestamp);
+
+        let remainingVolToMatch = iepResult.matchedVolume;
+        let buyIdx = 0;
+        let sellIdx = 0;
+
+        while (remainingVolToMatch > 0 && buyIdx < executableBuys.length && sellIdx < executableSells.length) {
+            const buyOrder = executableBuys[buyIdx];
+            const sellOrder = executableSells[sellIdx];
+
+            const matchQty = Math.min(
+                remainingVolToMatch,
+                buyOrder.data.remaining_quantity,
+                sellOrder.data.remaining_quantity
+            );
+
+            // Execute Trade at IEP Price
+            await this.executeTrade(
+                buyOrder.data,
+                sellOrder.data,
+                matchPrice, // FORCE PRICE to IEP
+                symbol,
+                buyOrder.price,
+                sellOrder.price,
+                buyOrder.raw,
+                sellOrder.raw
+            );
+
+            remainingVolToMatch -= matchQty;
+
+            // Update local state to track remaining quantities (executeTrade updates DB/Redis, but not our local arrays)
+            buyOrder.data.remaining_quantity -= matchQty;
+            sellOrder.data.remaining_quantity -= matchQty;
+
+            if (buyOrder.data.remaining_quantity <= 0) buyIdx++;
+            if (sellOrder.data.remaining_quantity <= 0) sellIdx++;
+        }
+
+        // Broadcast final cleanup
+        if (this.io) {
+            this.io.to(symbol).emit('iep_update', { symbol, iep: null, status: SessionStatus.OPEN });
+            await this.throttledBroadcast(symbol);
         }
     }
 
