@@ -113,6 +113,60 @@ router.post('/session/open', adminAuth, async (req: AuthRequest, res: Response) 
             console.log(`✅ Init ${stock.symbol}: prev=${prevClose}, ara=${araLimit}, arb=${arbLimit}`);
         }
 
+        // 4. Inject Order "Pending" dari saat market offline
+        // Update session_id untuk order yang pending dari session sebelumnya
+        const prevSessionRes = await client.query(`
+            SELECT id FROM trading_sessions
+            WHERE status = 'CLOSED'
+            ORDER BY ended_at DESC
+            LIMIT 1
+        `);
+
+        if ((prevSessionRes.rowCount ?? 0) > 0) {
+            const prevSessionId = prevSessionRes.rows[0].id;
+
+            // Ambil orders dari session sebelumnya yang statusnya PENDING
+            const offlineOrders = await client.query(`
+                SELECT o.*, s.symbol
+                FROM orders o
+                JOIN stocks s ON o.stock_id = s.id
+                WHERE o.session_id = $1 AND o.status = 'PENDING'
+            `, [prevSessionId]);
+
+            console.log(`🔄 Moving ${offlineOrders.rowCount} offline orders to new session...`);
+
+            if ((offlineOrders.rowCount ?? 0) > 0) {
+                // Update session ID ke session baru
+                await client.query(`
+                    UPDATE orders
+                    SET session_id = $1
+                    WHERE session_id = $2 AND status = 'PENDING'
+                `, [session.id, prevSessionId]);
+
+                // Masukkan ke Redis
+                for (const order of offlineOrders.rows) {
+                    const redisPayload = JSON.stringify({
+                        orderId: order.id,
+                        userId: order.user_id,
+                        stockId: order.stock_id,
+                        price: parseFloat(order.price),
+                        quantity: parseInt(order.quantity),
+                        timestamp: new Date(order.created_at).getTime(),
+                        remaining_quantity: parseInt(order.remaining_quantity)
+                    });
+
+                    const redisKey = `orderbook:${order.symbol}:${order.type.toLowerCase()}`;
+                    await redis.zadd(redisKey, order.price, redisPayload);
+                }
+
+                // Trigger matching untuk simbol yang ada order offline-nya
+                const affectedSymbols = new Set(offlineOrders.rows.map(o => o.symbol));
+                affectedSymbols.forEach((sym) => {
+                    MatchingEngine.match(sym as string);
+                });
+            }
+        }
+
         await client.query('COMMIT');
 
         res.json({
@@ -529,11 +583,46 @@ router.post('/stocks/:id/issue', adminAuth, async (req: AuthRequest, res: Respon
 router.get('/users', adminAuth, async (req: AuthRequest, res: Response) => {
     try {
         const result = await pool.query(`
-            SELECT id, username, full_name, balance_rdn, role, created_at
-            FROM users
-            ORDER BY created_at DESC
+            WITH latest_session AS (
+                SELECT id FROM trading_sessions ORDER BY id DESC LIMIT 1
+            ),
+            stock_prices AS (
+                SELECT
+                    stock_id,
+                    COALESCE(close_price, prev_close, 0) as price
+                FROM daily_stock_data
+                WHERE session_id = (SELECT id FROM latest_session)
+            ),
+            user_stock_value AS (
+                SELECT
+                    p.user_id,
+                    SUM(p.quantity_owned * sp.price * 100) as stock_value
+                FROM portfolios p
+                JOIN stock_prices sp ON p.stock_id = sp.stock_id
+                GROUP BY p.user_id
+            )
+            SELECT
+                u.id,
+                u.username,
+                u.full_name,
+                u.balance_rdn,
+                u.role,
+                u.created_at,
+                (CAST(u.balance_rdn AS NUMERIC) + COALESCE(usv.stock_value, 0)) as equity
+            FROM users u
+            LEFT JOIN user_stock_value usv ON u.id = usv.user_id
+            ORDER BY u.created_at DESC
         `);
-        res.json(result.rows);
+
+        // Convert numeric strings to numbers if needed, though pg driver might do it.
+        // Usually numeric/decimal types come back as strings in JS to preserve precision.
+        const users = result.rows.map(u => ({
+            ...u,
+            balance_rdn: parseFloat(u.balance_rdn),
+            equity: parseFloat(u.equity)
+        }));
+
+        res.json(users);
     } catch (err: any) {
         res.status(500).json({ error: 'Gagal mengambil data user: ' + err.message });
     }

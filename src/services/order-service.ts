@@ -13,15 +13,30 @@ export class OrderService {
             await client.query('BEGIN');
 
             // 1. Ambil data saham & harga ARA/ARB sesi ini
-            const stockRes = await client.query(`
+            let stockRes = await client.query(`
 /* dialect: postgres */
-SELECT s.id, d.ara_limit, d.arb_limit, d.session_id
+SELECT s.id, d.ara_limit, d.arb_limit, d.session_id, 'OPEN' as session_status
 FROM stocks s
 JOIN daily_stock_data d ON s.id = d.stock_id
 WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1)
 `, [symbol]);
 
-            if ((stockRes.rowCount ?? 0) === 0) throw new Error('Saham tidak ditemukan atau bursa sedang tutup');
+            // Jika pasar TUTUP, ambil data dari sesi TERAKHIR yang sudah close
+            let isMarketOpen = true;
+            if ((stockRes.rowCount ?? 0) === 0) {
+                stockRes = await client.query(`
+                    /* dialect: postgres */
+                    SELECT s.id, d.ara_limit, d.arb_limit, d.session_id, 'CLOSED' as session_status
+                    FROM stocks s
+                    JOIN daily_stock_data d ON s.id = d.stock_id
+                    WHERE s.symbol = $1
+                    ORDER BY d.session_id DESC LIMIT 1
+                `, [symbol]);
+
+                if ((stockRes.rowCount ?? 0) === 0) throw new Error('Saham tidak ditemukan');
+                isMarketOpen = false;
+            }
+
             const stock = stockRes.rows[0];
 
             // 2. Validasi Harga (Tick Size & ARA/ARB)
@@ -29,6 +44,7 @@ WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE st
             if (price > stock.ara_limit || price < stock.arb_limit) throw new Error('Harga melampaui batas ARA/ARB');
 
             const totalCost = price * (quantity * 100); // Quantity dalam Lot (1 Lot = 100 lembar)
+            let avgPriceAtOrder = null;
 
             if (type === 'BUY') {
                 // 3a. BUY: Cek & Potong Saldo RDN (Lock Balance)
@@ -48,7 +64,7 @@ WHERE s.symbol = $1 AND d.session_id = (SELECT id FROM trading_sessions WHERE st
                 // 3b. SELL: Cek kepemilikan saham
                 const portfolioRes = await client.query(`
 /* dialect: postgres */
-SELECT quantity_owned FROM portfolios
+SELECT quantity_owned, avg_buy_price FROM portfolios
 WHERE user_id = $1 AND stock_id = $2
 FOR UPDATE
 `, [userId, stock.id]);
@@ -58,6 +74,7 @@ FOR UPDATE
                 }
 
                 const ownedQty = parseInt(portfolioRes.rows[0].quantity_owned);
+                avgPriceAtOrder = portfolioRes.rows[0].avg_buy_price;
 
                 // Hitung total lot yang sudah masuk antrean jual (Pending/Partial)
                 const lockedRes = await client.query(`
@@ -77,38 +94,44 @@ WHERE user_id = $1 AND stock_id = $2 AND type = 'SELL' AND status IN ('PENDING',
             }
 
             // 4. Simpan Order ke Database (Status PENDING)
+            // Jika market closed, tetap simpan tapi jangan masuk Redis dulu.
+            // Session ID tetap menggunakan session terakhir (walaupun closed), nanti di-update saat OPEN session baru.
             const orderRes = await client.query(`
 /* dialect: postgres */
-INSERT INTO orders (user_id, stock_id, session_id, type, price, quantity, remaining_quantity, status)
-VALUES ($1, $2, $3, $4, $5, $6, $6, 'PENDING')
+INSERT INTO orders (user_id, stock_id, session_id, type, price, quantity, remaining_quantity, status, avg_price_at_order)
+VALUES ($1, $2, $3, $4, $5, $6, $6, 'PENDING', $7)
 RETURNING id
-`, [userId, stock.id, stock.session_id, type, price, quantity]);
+`, [userId, stock.id, stock.session_id, type, price, quantity, avgPriceAtOrder]);
 
             const orderId = orderRes.rows[0].id;
 
             await client.query('COMMIT');
 
-            // 5. Lempar ke Redis buat diolah Matching Engine
-            const timestamp = Date.now();
-            const redisPayload = JSON.stringify({
-                orderId,
-                userId,
-                stockId: stock.id,
-                price,
-                quantity,
-                timestamp,
-                remaining_quantity: quantity
+            // 5. Jika Market OPEN: Lempar ke Redis buat diolah Matching Engine
+            if (isMarketOpen) {
+                const timestamp = Date.now();
+                const redisPayload = JSON.stringify({
+                    orderId,
+                    userId,
+                    stockId: stock.id,
+                    price,
+                    quantity,
+                    timestamp,
+                    remaining_quantity: quantity,
+                    avg_price_at_order: avgPriceAtOrder ? parseFloat(avgPriceAtOrder) : undefined
+                });
 
-            });
+                const redisKey = `orderbook:${symbol}:${type.toLowerCase()}`;
+                await redis.zadd(redisKey, price, redisPayload);
 
-            const redisKey = `orderbook:${symbol}:${type.toLowerCase()}`;
-            await redis.zadd(redisKey, price, redisPayload);
+                console.log(`📝 Order placed: ${type} ${symbol} @ ${price} x ${quantity} lots (ID: ${orderId})`);
 
-            console.log(`📝 Order placed: ${type} ${symbol} @ ${price} x ${quantity} lots (ID: ${orderId})`);
-
-            // Panggil Engine tanpa await (Background Process)
-            MatchingEngine.match(symbol);
-            console.log(`🚀 Matching Engine triggered for ${symbol}`);
+                // Panggil Engine tanpa await (Background Process)
+                MatchingEngine.match(symbol);
+                console.log(`🚀 Matching Engine triggered for ${symbol}`);
+            } else {
+                console.log(`📝 Offline Order placed: ${type} ${symbol} @ ${price} x ${quantity} lots (ID: ${orderId}) - Waiting for session open`);
+            }
 
             return { orderId, status: 'PENDING', message: 'Order berhasil dipasang' };
         } catch (err: any) {
@@ -203,7 +226,8 @@ o.remaining_quantity,
 (o.quantity - o.remaining_quantity) as matched_quantity,
 o.status,
 o.created_at,
-o.session_id
+o.session_id,
+o.avg_price_at_order
 FROM orders o
 JOIN stocks s ON o.stock_id = s.id
 LEFT JOIN trades t ON (t.buy_order_id = o.id OR t.sell_order_id = o.id)
@@ -213,12 +237,24 @@ ORDER BY o.created_at DESC
 LIMIT 100
 `, [userId]);
 
-        return result.rows.map(row => ({
-            ...row,
-            price: parseFloat(row.execution_price),
-            target_price: parseFloat(row.target_price),
-            matched_quantity: parseInt(row.matched_quantity)
-        }));
+        return result.rows.map(row => {
+            const executionPrice = parseFloat(row.execution_price);
+            const matchedQuantity = parseInt(row.matched_quantity);
+            let profitLoss = null;
+
+            if (row.type === 'SELL' && row.avg_price_at_order && matchedQuantity > 0) {
+                const avgBuyPrice = parseFloat(row.avg_price_at_order);
+                profitLoss = (executionPrice - avgBuyPrice) * matchedQuantity * 100;
+            }
+
+            return {
+                ...row,
+                price: executionPrice,
+                target_price: parseFloat(row.target_price),
+                matched_quantity: matchedQuantity,
+                profit_loss: profitLoss
+            };
+        });
     }
 
     // Ambil order aktif (PENDING/PARTIAL) user

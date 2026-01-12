@@ -1,7 +1,7 @@
 # 📚 M-BIT Trading Platform - API Documentation
 
 > **Base URL**: `http://localhost:3000/api`
-> **Version**: 1.3.0
+> **Version**: 1.3.1
 > **Last Updated**: January 10, 2026
 
 ---
@@ -180,13 +180,15 @@ GET /market/candles/MICH?timeframe=5m&limit=100
     "high": 1250.00,
     "low": 1180.00,
     "close": 1230.00,
-    "volume": 5000
+    "volume": 5000,
+    "session_id": 5
   }
 ]
 ```
 
 **Notes:**
 - `time` is in milliseconds (JavaScript timestamp)
+- `session_id`: ID of the trading session when the candle was generated (null if not available)
 - Data sorted ascending by time
 
 ---
@@ -418,6 +420,9 @@ GET /market/queue/MICH?price=1250
 - `MATCHED`: Order fully filled
 - `CANCELED`: Order canceled by user or system
 - `REJECTED`: Order rejected (validation failed)
+
+**New Field:**
+- `profit_loss` (Numeric): Only available for `SELL` orders. Shows the realized Profit/Loss based on the difference between `execution_price` and the `average_buy_price` at the time of the order. `(Execution Price - Avg Buy Price) * Matched Quantity * 100`.
 
 ---
 
@@ -790,7 +795,8 @@ DELETE /portfolio/watchlist/MICH
     "full_name": "System Administrator",
     "balance_rdn": 0,
     "role": "ADMIN",
-    "created_at": "2026-01-01T00:00:00Z"
+    "created_at": "2026-01-01T00:00:00Z",
+    "equity": 0
   },
   {
     "id": "uuid-2",
@@ -798,9 +804,13 @@ DELETE /portfolio/watchlist/MICH
     "full_name": "John Doe",
     "balance_rdn": 0,
     "role": "USER",
-    "created_at": "2026-01-07T10:00:00Z"
+    "created_at": "2026-01-07T10:00:00Z",
+    "equity": 15000000
   }
 ]
+
+**New Field:**
+- `equity`: Total value of user assets (`balance_rdn + stock_value`). Stock value is calculated using the last available closing price.
 ```
 
 ---
@@ -1726,6 +1736,7 @@ CREATE TABLE candles (
     close_price NUMERIC(15, 2) NOT NULL,
     volume      INTEGER NOT NULL DEFAULT 0,
     timestamp   TIMESTAMP NOT NULL,
+    session_id  INTEGER REFERENCES trading_sessions(id) ON DELETE SET NULL,
     created_at  TIMESTAMP DEFAULT now(),
     UNIQUE (stock_id, timeframe, timestamp)
 );
