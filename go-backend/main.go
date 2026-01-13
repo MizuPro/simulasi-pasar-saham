@@ -115,10 +115,16 @@ func main() {
 	market.Get("/stocks", handlers.GetStocks)
 	market.Get("/market/ticker", handlers.GetMarketTicker)
 	market.Get("/market/depth/:symbol", handlers.GetOrderBook)
+	market.Get("/session", handlers.GetSessionStatus) // Public Session Status
 
 	// Protected Routes
 	protected := app.Group("/api", middleware.AuthMiddleware)
 	protected.Get("/portfolio", handlers.GetPortfolio) // /api/portfolio
+
+	// Watchlist Routes
+	protected.Get("/portfolio/watchlist", handlers.GetWatchlist)
+	protected.Post("/portfolio/watchlist", handlers.AddToWatchlist)
+	protected.Delete("/portfolio/watchlist/:symbol", handlers.RemoveFromWatchlist)
 
 	// Order Routes
 	orders := app.Group("/api/orders", middleware.AuthMiddleware) // Add Trading Rate Limiter here if needed

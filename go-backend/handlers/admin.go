@@ -140,8 +140,100 @@ func OpenSession(c *fiber.Ctx) error {
 }
 
 func CloseSession(c *fiber.Ctx) error {
-	// Not implemented yet
-	return c.JSON(fiber.Map{"message": "Not implemented yet"})
+	ctx := context.Background()
+	tx, err := config.DB.Begin(ctx)
+	if err != nil { return c.Status(500).JSON(fiber.Map{"error": err.Error()}) }
+	defer tx.Rollback(ctx)
+
+	// 1. Update status sesi jadi CLOSED
+	var sessionId int
+	err = tx.QueryRow(ctx, `
+		UPDATE trading_sessions
+		SET status = 'CLOSED', ended_at = NOW()
+		WHERE status IN ('OPEN', 'PRE_OPEN', 'LOCKED')
+		RETURNING id
+	`).Scan(&sessionId)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return c.Status(400).JSON(fiber.Map{"error": "Tidak ada sesi yang sedang berjalan"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	engine.Engine.SessionStatus = engine.StatusClosed
+
+	// 2. Cancel semua order yang masih PENDING/PARTIAL
+	// Ambil dulu semua order untuk di-refund
+	rows, err := tx.Query(ctx, `
+		SELECT o.id, o.user_id, o.type, o.price, o.remaining_quantity, s.symbol
+		FROM orders o
+		JOIN stocks s ON o.stock_id = s.id
+		WHERE o.session_id = $1 AND o.status IN ('PENDING', 'PARTIAL')
+	`, sessionId)
+	if err != nil { return c.Status(500).JSON(fiber.Map{"error": err.Error()}) }
+
+	type PendingOrder struct {
+		ID           string
+		UserID       string
+		Type         string
+		Price        float64
+		RemainingQty int64
+		Symbol       string
+	}
+	var orders []PendingOrder
+
+	for rows.Next() {
+		var o PendingOrder
+		if err := rows.Scan(&o.ID, &o.UserID, &o.Type, &o.Price, &o.RemainingQty, &o.Symbol); err == nil {
+			orders = append(orders, o)
+		}
+	}
+	rows.Close()
+
+	for _, order := range orders {
+		if order.Type == "BUY" {
+			// Kembalikan saldo RDN
+			refund := order.Price * float64(order.RemainingQty * 100) // Assuming 100 shares/lot
+			// Use simple update, logic mirroring Node
+			_, err := tx.Exec(ctx, "UPDATE users SET balance_rdn = balance_rdn + $1 WHERE id = $2", refund, order.UserID)
+			if err != nil { return c.Status(500).JSON(fiber.Map{"error": err.Error()}) }
+		}
+
+		// Update status order
+		_, err := tx.Exec(ctx, "UPDATE orders SET status = 'CANCELED' WHERE id = $1", order.ID)
+		if err != nil { return c.Status(500).JSON(fiber.Map{"error": err.Error()}) }
+
+		// Hapus dari Redis
+		// Optimized: Since we flush all Redis later, we might skip individual ZRem if we just clear everything.
+		// The Node code did individual ZRem AND full flush.
+		// Let's stick to full flush for efficiency and correctness at end.
+		// key := fmt.Sprintf("orderbook:%s:%s", order.Symbol, func() string { if order.Type == "BUY" { return "buy" } else { return "sell" } }())
+		// _ = key // unused
+	}
+
+	if err := tx.Commit(ctx); err != nil { return c.Status(500).JSON(fiber.Map{"error": err.Error()}) }
+
+	// IMPORTANT: Flush all orderbook data from Redis
+	// Get all unique symbols
+	sRows, err := config.DB.Query(ctx, "SELECT DISTINCT symbol FROM stocks WHERE is_active = true")
+	if err == nil {
+		defer sRows.Close()
+		pipeline := config.RedisMain.Pipeline()
+		for sRows.Next() {
+			var symbol string
+			if err := sRows.Scan(&symbol); err == nil {
+				pipeline.Del(ctx, "orderbook:"+symbol+":buy")
+				pipeline.Del(ctx, "orderbook:"+symbol+":sell")
+			}
+		}
+		pipeline.Exec(ctx)
+	}
+
+	return c.JSON(fiber.Map{
+		"message":        "Sesi trading berhasil ditutup",
+		"canceledOrders": len(orders),
+	})
 }
 
 // Bot Handlers
