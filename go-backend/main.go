@@ -109,13 +109,26 @@ func main() {
 	auth := app.Group("/api/auth", authLimiter)
 	auth.Post("/register", handlers.Register)
 	auth.Post("/login", handlers.Login)
+	// New Admin Auth Routes
+	authAdmin := auth.Group("/admin", middleware.AuthMiddleware, middleware.AdminAuthMiddleware)
+	authAdmin.Post("/create", handlers.CreateAdmin)
+	authAdmin.Get("/users", handlers.GetAllUsers)
+	authAdmin.Put("/role", handlers.UpdateUserRole)
 
 	// Market Data Routes
 	market := app.Group("/api", dataLimiter) // Includes /market, /stocks, /portfolio
 	market.Get("/stocks", handlers.GetStocks)
 	market.Get("/market/ticker", handlers.GetMarketTicker)
-	market.Get("/market/depth/:symbol", handlers.GetOrderBook)
+	market.Get("/market/depth/:symbol", handlers.GetOrderBook) // Alias legacy
+	market.Get("/market/stocks/:symbol/orderbook", handlers.GetOrderBook) // Standard
 	market.Get("/session", handlers.GetSessionStatus) // Public Session Status
+
+	// New Market Data Routes
+	market.Get("/market/candles/:symbol", handlers.GetCandles)
+	market.Get("/market/daily-data", handlers.GetDailyData)
+	market.Get("/market/daily-data/:symbol", handlers.GetDailyDataBySymbol)
+	market.Get("/market/queue/:symbol", handlers.GetOrderQueue)
+	market.Get("/market/iep/:symbol", handlers.GetIEP)
 
 	// Protected Routes
 	protected := app.Group("/api", middleware.AuthMiddleware)
@@ -130,11 +143,36 @@ func main() {
 	orders := app.Group("/api/orders", middleware.AuthMiddleware) // Add Trading Rate Limiter here if needed
 	orders.Post("/", handlers.PlaceOrder)
 	orders.Delete("/:id", handlers.CancelOrder)
+	// New Order History Routes
+	orders.Get("/history", handlers.GetOrderHistory)
+	orders.Get("/active", handlers.GetActiveOrders)
 
 	// Admin Routes
 	admin := app.Group("/api/admin", middleware.AuthMiddleware, middleware.AdminAuthMiddleware)
 	admin.Post("/session/open", handlers.OpenSession)
 	admin.Post("/session/close", handlers.CloseSession)
+	admin.Post("/init-session", handlers.InitSession)
+
+	// New Admin Stock Management
+	admin.Post("/stocks", handlers.CreateStock)
+	admin.Put("/stocks/:id", handlers.UpdateStock)
+	admin.Post("/stocks/:id/issue", handlers.IssueShares)
+
+	// New Admin User Management
+	admin.Put("/users/:userId/balance", handlers.AdjustUserBalance)
+	admin.Put("/users/:userId/portfolio/:stockId", handlers.AdjustUserPortfolio)
+
+	// New Admin Inspection & Engine
+	admin.Get("/orders", handlers.GetAllOrders)
+	admin.Get("/trades", handlers.GetAllTrades)
+	admin.Get("/engine/stats", handlers.GetEngineStats)
+	admin.Get("/health", handlers.HealthCheck)
+	admin.Get("/orderbook/validate", handlers.ValidateOrderbook)
+	admin.Post("/engine/reset-circuit", handlers.ResetCircuit)
+	admin.Post("/engine/force-broadcast", handlers.ForceBroadcast)
+
+	// Legacy endpoint compatibility for Admin Orderbook
+	admin.Get("/orderbook/:symbol", handlers.GetOrderBook)
 
 	// Admin Bot Routes
 	admin.Post("/bot/populate", handlers.PopulateBot)
