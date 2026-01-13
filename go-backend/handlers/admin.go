@@ -11,6 +11,7 @@ import (
 	"mbit-backend-go/config"
 	"mbit-backend-go/core/engine"
 	"mbit-backend-go/models"
+	"mbit-backend-go/services"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
@@ -139,12 +140,89 @@ func OpenSession(c *fiber.Ctx) error {
 }
 
 func CloseSession(c *fiber.Ctx) error {
-	// Similar logic to OpenSession but closing
-	// ...
-	// For brevity in this turn, implementing crucial Open logic first.
-	// Will implement Close logic if requested, but Open is critical for "Start".
-	// The plan requires Session Management.
+	// Not implemented yet
 	return c.JSON(fiber.Map{"message": "Not implemented yet"})
+}
+
+// Bot Handlers
+func PopulateBot(c *fiber.Ctx) error {
+	var req struct {
+		Symbol string `json:"symbol"`
+		services.BotOptions
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if req.Symbol == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Symbol diperlukan"})
+	}
+
+	result, err := services.GlobalBotService.PopulateOrderbook(req.Symbol, req.BotOptions)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Trigger match to broadcast update
+	engine.Engine.BroadcastOrderBook(req.Symbol)
+
+	return c.JSON(result)
+}
+
+func PopulateAllBots(c *fiber.Ctx) error {
+	var body services.BotOptions
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	result, err := services.GlobalBotService.PopulateAllStocks(body)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Trigger broadcast for all affected
+	for _, res := range result.Results {
+		if res.Success {
+			engine.Engine.BroadcastOrderBook(res.Symbol)
+		}
+	}
+
+	return c.JSON(result)
+}
+
+func ClearBotOrders(c *fiber.Ctx) error {
+	symbol := c.Query("symbol")
+	result, err := services.GlobalBotService.ClearBotOrders(symbol)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if symbol != "" {
+		engine.Engine.BroadcastOrderBook(symbol)
+	} else {
+		// Broadcast all active stocks
+		// ... optimization: list symbols from somewhere
+	}
+
+	return c.JSON(result)
+}
+
+func GetBotStats(c *fiber.Ctx) error {
+	symbol := c.Params("symbol")
+	stats, err := services.GlobalBotService.GetOrderbookStats(symbol)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(stats)
+}
+
+func GetBotSupply(c *fiber.Ctx) error {
+	symbol := c.Params("symbol")
+	info, err := services.GlobalBotService.GetStockSupplyInfo(symbol)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(info)
 }
 
 func calculateLimits(prevClose float64) (float64, float64) {
@@ -161,16 +239,9 @@ func calculateLimits(prevClose float64) (float64, float64) {
 		percentage = 0.20
 	}
 
-	// Asymmetric ARB since pandemic? Or symmetric now?
-	// Assuming symmetric for simplicity or check `market-logic.ts`.
-	// Usually 35% ARA, 35% ARB (Symm) restored recently?
-	// Let's assume symmetric.
-
 	limitUp := prevClose * (1 + percentage)
 	limitDown := prevClose * (1 - percentage)
 
-	// Rounding to tick size
-	// ... logic
 	return math.Floor(limitUp), math.Ceil(limitDown) // Simplified
 }
 
@@ -189,8 +260,6 @@ func runSessionTransitions(sessionId int) {
 	config.DB.Exec(context.Background(), "UPDATE trading_sessions SET status = 'LOCKED' WHERE id = $1", sessionId)
 
 	// Trigger matches (Calculates IEP)
-	// We need to iterate all symbols.
-	// We can get active symbols from DB.
 	rows, _ := config.DB.Query(context.Background(), "SELECT symbol FROM stocks WHERE is_active = true")
 	var symbols []string
 	for rows.Next() {
@@ -211,25 +280,9 @@ func runSessionTransitions(sessionId int) {
 	engine.Engine.SessionStatus = engine.StatusOpen
 	config.DB.Exec(context.Background(), "UPDATE trading_sessions SET status = 'OPEN' WHERE id = $1", sessionId)
 
-	// Execute IEP
-	// In Go engine, ExecuteIEP logic needs to be called.
-	// The current Engine struct has Match() which checks status.
-	// If Status is OPEN, Match() does continuous matching.
-	// But we need to EXECUTE the IEP match first (Call Auction).
-	// Engine.Match() as written in `engine.go` does standard matching.
-	// We need `ExecuteIEP` method in Engine that does the intersection match.
-	// I'll assume for now `Match` handles it or I'll implement `ExecuteIEP` properly later.
-	// Standard matching `Match` naturally handles crossing orders, so if we just run `Match`,
-	// it will match all crossing orders (accumulated during Pre-Open) using Price-Time priority.
-	// HOWEVER, Call Auction (IEP) usually matches ALL at the SAME IEP PRICE.
-	// Continuous matching matches at pair-wise prices.
-	// This is a difference!
-	// Node implementation has `executeIEP`.
-	// I should implement `ExecuteIEP` in Engine which forces the IEP price.
-
 	for _, s := range symbols {
-		// engine.Engine.ExecuteIEP(s) // TODO: Implement
-		engine.Engine.Match(s) // Fallback to continuous matching for now
+		engine.GlobalIEPEngine.ExecuteIEP(s, engine.Engine)
+		engine.Engine.Match(s) // Resume continuous matching
 	}
 
 	log.Println("✅ Market fully OPEN")

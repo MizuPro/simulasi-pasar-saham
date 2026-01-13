@@ -14,6 +14,14 @@ import (
 func GetPortfolio(c *fiber.Ctx) error {
 	userId := c.Locals("userId").(string)
 
+	// Fetch User Balance & Name
+	var fullName string
+	var balanceRdn float64
+	err := config.DB.QueryRow(context.Background(), "SELECT full_name, balance_rdn FROM users WHERE id = $1", userId).Scan(&fullName, &balanceRdn)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "User not found"})
+	}
+
 	query := `
 		SELECT
 			p.user_id,
@@ -21,19 +29,15 @@ func GetPortfolio(c *fiber.Ctx) error {
 			s.symbol,
 			p.quantity_owned,
 			p.avg_buy_price,
-			s.current_price
+			COALESCE(d.close_price, d.prev_close, 1000) as current_price
 		FROM portfolios p
 		JOIN stocks s ON p.stock_id = s.id
+		LEFT JOIN daily_stock_data d ON s.id = d.stock_id AND d.session_id = (SELECT id FROM trading_sessions WHERE status IN ('OPEN', 'LOCKED', 'PRE_OPEN') ORDER BY id DESC LIMIT 1)
 		WHERE p.user_id = $1 AND p.quantity_owned > 0
 	`
-	// Note: current_price from stocks table might not be real-time if not updated frequently.
-	// But based on schema, stocks has current_price.
 
 	rows, err := config.DB.Query(context.Background(), query, userId)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return c.JSON([]models.PortfolioItem{})
-		}
+	if err != nil && err != pgx.ErrNoRows {
 		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengambil portfolio"})
 	}
 	defer rows.Close()
@@ -41,41 +45,31 @@ func GetPortfolio(c *fiber.Ctx) error {
 	var portfolio []models.PortfolioItem
 	for rows.Next() {
 		var item models.PortfolioItem
-		// Scan to temp vars because avg_buy_price is numeric which maps to float64 but DB might return string for numeric if not configured?
-		// pgx usually handles numeric to string or float64.
-		// Let's assume float64 works for numeric.
+
 		if err := rows.Scan(
 			&item.UserID,
-			&item.StockID, // StockID is int in DB, string in model?
-						   // Wait, stocks.id is integer in DB schema.
-						   // Model StockID is string. This is a mismatch.
-						   // I should fix model or scan to int then convert.
-						   // Let's fix model in next step or convert here.
+			&item.StockID,
 			&item.Symbol,
 			&item.Quantity,
 			&item.AveragePrice,
 			&item.CurrentPrice,
 		); err != nil {
-			// Try to handle potential type mismatch (e.g. string vs int) if needed
-			// For now, continue
 			continue
 		}
 
-		item.UnrealizedPL = (item.CurrentPrice - item.AveragePrice) * float64(item.Quantity) * 100 // Multiplier 100 usually?
-		// Node code: `(execution_price - avg_price_at_order) * matched_quantity * 100` memory says so.
-		// Standard Indonesian stock lot is 100 shares.
-		// But here quantity_owned is likely SHARES or LOTS?
-		// Schema says `quantity_owned integer`.
-		// Memory says `avg_price_at_order` is used for profit.
-		// Let's assume 100 multiplier applies to value calculation if price is per share and quantity is lots.
-		// If quantity is shares, no multiplier.
-		// Usually `quantity` in DB is lots or shares. Node `Trade` logic inserts `matchQty`.
-		// User memory: `profit/loss field` calculation `(execution_price - avg_price_at_order) * matched_quantity * 100`.
-		// This implies `matched_quantity` is LOTS.
-		// Let's stick to simple calculation: (Current - Avg) * Qty * 100.
+		// Calculate Unrealized P/L: (Current Price - Avg Buy Price) * Lots * 100 (shares per lot)
+		item.UnrealizedPL = (item.CurrentPrice - item.AveragePrice) * float64(item.Quantity) * 100
 
 		portfolio = append(portfolio, item)
 	}
 
-	return c.JSON(portfolio)
+	if portfolio == nil {
+		portfolio = []models.PortfolioItem{}
+	}
+
+	return c.JSON(fiber.Map{
+		"full_name":   fullName,
+		"balance_rdn": balanceRdn,
+		"stocks":      portfolio,
+	})
 }

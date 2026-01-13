@@ -103,25 +103,6 @@ func main() {
 	})
 
 	// Socket.IO Handler (Adapter for Fiber)
-	// zishang520/socket.io provides a handler compatible with http.Handler usually.
-	// Fiber uses fasthttp. We need fiber adapter or use fasthttp adaptor.
-	// `io.ServeHandler(nil)` returns an http.Handler.
-	// Use fiber's adaptor.
-	// Note: Socket.IO often needs sticky sessions or specific path handling.
-	// Path is usually /socket.io/
-
-	// Native Fiber handling for Socket.IO is complex due to Hijack support needed.
-	// It's often easier to run Socket.IO on a separate port or use `github.com/gofiber/contrib/socketio` (which wraps standard socket.io?)
-	// But `zishang520` claims fasthttp support?
-	// The library `zishang520/socket.io` has `engine.NewServer`.
-	// Let's assume standard http handler via adaptor.
-
-	// For now, let's skip direct Socket mounting in this plan step if complex,
-	// OR use a standard net/http server for the whole thing if Fiber proves difficult with Socket.IO.
-	// However, user asked for Fiber.
-	// Best practice: Run Socket.IO on the same port but intercepted by a specific path handler.
-	// Or use `gofiber/adaptor`.
-
 	app.All("/socket.io/*", adaptor.HTTPHandler(io.ServeHandler(nil)))
 
 	// Auth Routes
@@ -148,7 +129,13 @@ func main() {
 	admin := app.Group("/api/admin", middleware.AuthMiddleware, middleware.AdminAuthMiddleware)
 	admin.Post("/session/open", handlers.OpenSession)
 	admin.Post("/session/close", handlers.CloseSession)
-	// Add other admin routes...
+
+	// Admin Bot Routes
+	admin.Post("/bot/populate", handlers.PopulateBot)
+	admin.Post("/bot/populate-all", handlers.PopulateAllBots)
+	admin.Delete("/bot/clear", handlers.ClearBotOrders)
+	admin.Get("/bot/stats/:symbol", handlers.GetBotStats)
+	admin.Get("/bot/supply/:symbol", handlers.GetBotSupply)
 
 	// 5. Start
 	port := config.GetEnv("PORT", "3000") // 3000 matches current
