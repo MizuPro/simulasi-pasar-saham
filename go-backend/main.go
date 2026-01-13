@@ -88,7 +88,7 @@ func main() {
 	// Rate Limiters
 	authLimiter := middleware.NewAuthLimiter()
 	dataLimiter := middleware.NewDataLimiter()
-	// tradingLimiter := middleware.NewTradingLimiter()
+	tradingLimiter := middleware.NewTradingLimiter()
 
 	// 4. Routes
 
@@ -140,7 +140,7 @@ func main() {
 	protected.Delete("/portfolio/watchlist/:symbol", handlers.RemoveFromWatchlist)
 
 	// Order Routes
-	orders := app.Group("/api/orders", middleware.AuthMiddleware) // Add Trading Rate Limiter here if needed
+	orders := app.Group("/api/orders", middleware.AuthMiddleware, tradingLimiter)
 	orders.Post("/", handlers.PlaceOrder)
 	orders.Delete("/:id", handlers.CancelOrder)
 	// New Order History Routes
