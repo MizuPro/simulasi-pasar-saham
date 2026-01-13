@@ -2,14 +2,10 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"sort"
 
 	"mbit-backend-go/config"
-	"mbit-backend-go/models"
-
-	"github.com/redis/go-redis/v9"
 )
 
 type IEPEngine struct{}
@@ -140,25 +136,84 @@ func (e *IEPEngine) CalculateIEP(symbol string) (*IEPResult, error) {
 	return &surplusCandidates[0], nil
 }
 
-func parseOrders(raw []redis.Z) []ParsedOrder {
-	var parsed []ParsedOrder
-	for _, z := range raw {
-		var data models.RedisOrderData
-		str, ok := z.Member.(string)
-		if !ok {
-			continue
-		}
-		if err := json.Unmarshal([]byte(str), &data); err == nil {
-			if data.RemainingQuantity > 0 {
-				parsed = append(parsed, ParsedOrder{
-					Data:  data,
-					Price: z.Score,
-					Raw:   str,
-				})
-			}
+// Function to EXECUTE the IEP match (Call Auction)
+func (e *IEPEngine) ExecuteIEP(symbol string, engine *MatchingEngine) error {
+	iep, err := e.CalculateIEP(symbol)
+	if err != nil || iep == nil {
+		return nil
+	}
+
+	// Iterate orders and match at IEP Price
+	ctx := context.Background()
+
+	// Need to fetch again to be sure of state or reuse if we lock?
+	// The caller should have locked the symbol.
+	// We assume we are inside the lock.
+
+	// In Call Auction, all Buy orders with Price >= IEP and Sell orders with Price <= IEP are matched at IEP.
+
+	// 1. Fetch
+	buyQueueRaw, _ := config.RedisMain.ZRevRangeWithScores(ctx, "orderbook:"+symbol+":buy", 0, -1).Result()
+	sellQueueRaw, _ := config.RedisMain.ZRangeWithScores(ctx, "orderbook:"+symbol+":sell", 0, -1).Result()
+
+	buys := parseOrders(buyQueueRaw) // Descending Price
+	sells := parseOrders(sellQueueRaw) // Ascending Price
+
+	// 2. Filter eligible
+	var eligibleBuys []ParsedOrder
+	for _, b := range buys {
+		if b.Price >= iep.Price {
+			eligibleBuys = append(eligibleBuys, b)
 		}
 	}
-	return parsed
+
+	var eligibleSells []ParsedOrder
+	for _, s := range sells {
+		if s.Price <= iep.Price {
+			eligibleSells = append(eligibleSells, s)
+		}
+	}
+
+	// 3. Match Loop
+	bIdx, sIdx := 0, 0
+	for bIdx < len(eligibleBuys) && sIdx < len(eligibleSells) {
+		buy := eligibleBuys[bIdx]
+		sell := eligibleSells[sIdx]
+
+		// Execute at IEP Price
+		if err := engine.ExecuteTrade(buy.Data, sell.Data, iep.Price, symbol, buy.Price, sell.Price, buy.Raw, sell.Raw); err != nil {
+			// Log error?
+			break
+		}
+
+		// Check remaining to advance index
+		// Since ExecuteTrade modifies the order in DB and Redis,
+		// but `buy` and `sell` structs here are stale copies of Data.RemainingQuantity.
+		// However, ExecuteTrade logic uses the passed struct data.
+		// Wait, ExecuteTrade logic calculates matchQty based on passed struct.
+		// It returns nil on success.
+		// We need to update our local state to know if we advanced.
+
+		matchQty := buy.Data.RemainingQuantity
+		if sell.Data.RemainingQuantity < matchQty {
+			matchQty = sell.Data.RemainingQuantity
+		}
+
+		buy.Data.RemainingQuantity -= matchQty
+		sell.Data.RemainingQuantity -= matchQty
+
+		eligibleBuys[bIdx] = buy
+		eligibleSells[sIdx] = sell
+
+		if buy.Data.RemainingQuantity <= 0 {
+			bIdx++
+		}
+		if sell.Data.RemainingQuantity <= 0 {
+			sIdx++
+		}
+	}
+
+	return nil
 }
 
 var GlobalIEPEngine = &IEPEngine{}

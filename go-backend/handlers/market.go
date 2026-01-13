@@ -20,11 +20,16 @@ func GetStocks(c *fiber.Ctx) error {
 	query := `
 		SELECT
 			s.id, s.symbol, s.name, s.max_shares, s.is_active,
-			COALESCE(d.close_price, 0) as current_price,
-			COALESCE(d.prev_close, 0) as initial_price
+			(SELECT COALESCE(SUM(quantity_owned), 0) FROM portfolios WHERE stock_id = s.id) as total_shares,
+			COALESCE(d.close_price, d.prev_close, 1000) as current_price,
+			COALESCE(d.prev_close, 1000) as prev_close,
+			COALESCE(d.ara_limit, 0) as ara,
+			COALESCE(d.arb_limit, 0) as arb,
+			COALESCE(d.volume, 0) as volume
 		FROM stocks s
 		LEFT JOIN daily_stock_data d ON s.id = d.stock_id
 		AND d.session_id = (SELECT id FROM trading_sessions ORDER BY id DESC LIMIT 1)
+		WHERE s.is_active = true
 		ORDER BY s.symbol ASC
 	`
 	rows, err := config.DB.Query(context.Background(), query)
@@ -33,18 +38,39 @@ func GetStocks(c *fiber.Ctx) error {
 	}
 	defer rows.Close()
 
-	var stocks []models.Stock
+	type StockResponse struct {
+		ID            int     `json:"id"`
+		Symbol        string  `json:"symbol"`
+		Name          string  `json:"name"`
+		IsActive      bool    `json:"is_active"`
+		MaxShares     int64   `json:"max_shares"`
+		TotalShares   int64   `json:"total_shares"`
+		LastPrice     float64 `json:"lastPrice"`
+		PrevClose     float64 `json:"prevClose"`
+		Change        float64 `json:"change"`
+		ChangePercent float64 `json:"changePercent"`
+		ARA           float64 `json:"ara"`
+		ARB           float64 `json:"arb"`
+		Volume        int64   `json:"volume"`
+	}
+
+	var stocks []StockResponse
 	for rows.Next() {
-		var s models.Stock
-		var isActive bool
-		if err := rows.Scan(&s.ID, &s.Symbol, &s.CompanyName, &s.TotalShares, &isActive, &s.CurrentPrice, &s.InitialPrice); err != nil {
+		var s StockResponse
+		if err := rows.Scan(
+			&s.ID, &s.Symbol, &s.Name, &s.MaxShares, &s.IsActive,
+			&s.TotalShares,
+			&s.LastPrice, &s.PrevClose,
+			&s.ARA, &s.ARB, &s.Volume,
+		); err != nil {
 			continue
 		}
-		if isActive {
-			s.Status = "ACTIVE"
-		} else {
-			s.Status = "SUSPENDED"
+
+		s.Change = s.LastPrice - s.PrevClose
+		if s.PrevClose > 0 {
+			s.ChangePercent = (s.Change / s.PrevClose) * 100
 		}
+
 		stocks = append(stocks, s)
 	}
 
@@ -135,42 +161,6 @@ func GetOrderBook(c *fiber.Ctx) error {
 			TotalQty int64   `json:"totalQty"`
 			Count    int     `json:"count"`
 		}
-
-		priceMap := make(map[float64]*AggregatedLevel)
-
-		for _, z := range results {
-			var data models.RedisOrderData
-			str, ok := z.Member.(string)
-			if !ok { continue }
-
-			if err := json.Unmarshal([]byte(str), &data); err == nil {
-				qty := data.RemainingQuantity
-				if qty <= 0 { continue }
-
-				if _, exists := priceMap[z.Score]; !exists {
-					priceMap[z.Score] = &AggregatedLevel{Price: z.Score, TotalQty: 0, Count: 0}
-				}
-				priceMap[z.Score].TotalQty += qty
-				priceMap[z.Score].Count++
-			}
-		}
-
-		// Convert map to slice
-		var depth []map[string]interface{}
-		for _, level := range priceMap {
-			depth = append(depth, map[string]interface{}{
-				"price":    level.Price,
-				"totalQty": level.TotalQty,
-				"count":    level.Count,
-			})
-		}
-
-		// Sort
-		// Note: Map iteration is random, but frontend/Redis usually expects sorted.
-		// However, API consumers usually sort themselves or expect sorted.
-		// Since we used ZRange/ZRevRange, Redis returned sorted. But Map destroyed it.
-		// We should re-sort or use a slice + checking last element.
-		// Simple approach: Use slice directly.
 
 		// Actually, let's just loop and aggregate sequentially since Redis result is sorted.
 		var finalDepth []map[string]interface{}

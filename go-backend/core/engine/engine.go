@@ -137,6 +137,22 @@ func (e *MatchingEngine) Match(symbol string) {
 	}()
 }
 
+func parseOrders(queue []redis.Z) []ParsedOrder {
+	var orders []ParsedOrder
+	for _, z := range queue {
+		str, ok := z.Member.(string)
+		if !ok { continue }
+		var data models.RedisOrderData
+		if err := json.Unmarshal([]byte(str), &data); err != nil { continue }
+		orders = append(orders, ParsedOrder{
+			Data:  data,
+			Price: z.Score,
+			Raw:   str,
+		})
+	}
+	return orders
+}
+
 func (e *MatchingEngine) ExecuteTrade(buy, sell models.RedisOrderData, price float64, symbol string, buyPrice, sellPrice float64, buyRaw, sellRaw string) error {
 	ctx := context.Background()
 	tx, err := config.DB.Begin(ctx)
