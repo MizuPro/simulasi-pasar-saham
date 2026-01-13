@@ -333,11 +333,22 @@ func (e *MatchingEngine) NotifyTrade(symbol string, price float64, qty int64, bu
 	ts := time.Now().UnixMilli()
 
 	// Emit Trade (Public)
-	e.IoServer.To(socketio.Room(symbol)).Emit("trade", map[string]interface{}{
+	tradeData := map[string]interface{}{
 		"symbol":    symbol,
 		"price":     price,
 		"quantity":  qty,
 		"timestamp": ts,
+	}
+	e.IoServer.To(socketio.Room(symbol)).Emit("trade", tradeData)
+	// To prevent frontend crashes, we ensure all documented fields are present.
+	// In a real scenario, we would fetch the daily stats from a cache or DB.
+	// For now, we set them to safe defaults to maintain contract parity.
+	e.IoServer.To(socketio.Room(symbol)).Emit("price_update", map[string]interface{}{
+		"symbol":        symbol,
+		"lastPrice":     price,
+		"change":        0.0, // Placeholder
+		"changePercent": 0.0, // Placeholder
+		"volume":        qty, // Current trade volume
 	})
 
 	// Private Notifications
